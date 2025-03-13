@@ -1,6 +1,15 @@
 {
-  "originHash" : "c63f273e5cb617807c97980d80382e38a71149a0f55f7ebfec6e21b6495dd9e9",
+  "originHash" : "0d7afab8937f679a554ed7255f9ca338bd5b9353c32dfd28f652b7fda4e116fa",
   "pins" : [
+    {
+      "identity" : "bencodekit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Samasaur1/BencodeKit",
+      "state" : {
+        "branch" : "main",
+        "revision" : "0489f12bd8b480cdd3b192b7ba0c123f8bf39a55"
+      }
+    },
     {
       "identity" : "flyingfox",
       "kind" : "remoteSourceControl",
