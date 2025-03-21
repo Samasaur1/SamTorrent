@@ -5,68 +5,6 @@ import BencodeKit
 let BIND_ADDRESS = "0.0.0.0"
 let BIND_PORT: UInt16 = 12345
 
-// https://stackoverflow.com/a/40089462
-extension Data {
-    struct HexEncodingOptions: OptionSet {
-        let rawValue: Int
-        static let upperCase = HexEncodingOptions(rawValue: 1 << 0)
-    }
-
-    func hexEncodedString(options: HexEncodingOptions = []) -> String {
-        let hexDigits = options.contains(.upperCase) ? "0123456789ABCDEF" : "0123456789abcdef"
-        if #available(macOS 11.0, iOS 14.0, watchOS 7.0, tvOS 14.0, *) {
-            let utf8Digits = Array(hexDigits.utf8)
-            return String(unsafeUninitializedCapacity: 2 * self.count) { (ptr) -> Int in
-                var p = ptr.baseAddress!
-                for byte in self {
-                    p[0] = utf8Digits[Int(byte / 16)]
-                    p[1] = utf8Digits[Int(byte % 16)]
-                    p += 2
-                }
-                return 2 * self.count
-            }
-        } else {
-            let utf16Digits = Array(hexDigits.utf16)
-            var chars: [unichar] = []
-            chars.reserveCapacity(2 * self.count)
-            for byte in self {
-                chars.append(utf16Digits[Int(byte / 16)])
-                chars.append(utf16Digits[Int(byte % 16)])
-            }
-            return String(utf16CodeUnits: chars, count: chars.count)
-        }
-    }
-}
-
-// https://www.swiftbysundell.com/articles/async-and-concurrent-forEach-and-map/
-extension Sequence {
-    func asyncMap<T>(
-        _ transform: (Element) async throws -> T
-    ) async rethrows -> [T] {
-        var values = [T]()
-
-        for element in self {
-            try await values.append(transform(element))
-        }
-
-        return values
-    }
-    //
-    // func concurrentMap<T: Sendable>(
-    //     _ transform: @escaping (Element) async throws -> T
-    // ) async rethrows -> [T] {
-    //     let tasks = map { element in
-    //         Task {
-    //             try await transform(element)
-    //         }
-    //     }
-    //
-    //     return try await tasks.asyncMap { task in
-    //         try await task.value
-    //     }
-    // }
-}
-
 actor AsyncSocketWrapper {
     public let socket: AsyncSocket
     public private(set) var disconnected: Bool = false
@@ -120,12 +58,33 @@ enum InfoHash: Hashable, CustomStringConvertible {
 actor Torrent {
     private var sockets: [AsyncSocketWrapper] = []
     private var task: Task<Void, Error>? = nil
+    private var trackerTask: Task<Void, Error>? = nil
+
+    private enum Event: String {
+        case start = "started"
+        case stop = "stopped"
+    }
+
+    // private func request(to event: Event? = nil) -> URLRequest {
+    //     var s = "trackerURL"
+    //     var request = URLRequest(url: URL(string: "")!)
+    // }
 
     var running = false {
         didSet {
             if running != oldValue {
+                // self.trackerTask = Task {
+                //     try await 
+                // }
                 self.task = Task {
                     while running {
+                        // try await withTaskGroup(of: Void.self) { group in
+                        //     group.addTask {
+                        //         var request = URLRequest(url: URL(string: "")!)
+                        //         request.httpMethod = "GET"
+                        //         let (data, response) = try! await URLSession.shared.data(for: request)
+                        //     }
+                        // }
                         print("removing sockets")
                         await self.removeDisconnectedSockets()
                         let count = sockets.count
@@ -149,53 +108,6 @@ actor Torrent {
                         try await Task.sleep(nanoseconds: 1000000000)
                         print("running: \(running)")
                     }
-                    // while running {
-                    //     let count = sockets.count
-                    //     let toRemove = await withTaskGroup(of: [Int].self, returning: [Int].self) { group in
-                    //         for i in 0..<count {
-                    //             let socket = self.sockets[i]
-                    //             group.addTask {
-                    //                 do {
-                    //                     try await socket.write("\(count) connections\n".data(using: .utf8)!)
-                    //                     return []
-                    //                 } catch {
-                    //                     return [i]
-                    //                 }
-                    //             }
-                    //         }
-                    //         return group.reduce(into: [], { $0.append($1) }
-                    //     }
-                    // }
-                    // while running {
-                    //     let count = sockets.count
-                    //     let socketsCopy = sockets
-                    //     var toRemove = [Int]()
-                    //     await withTaskGroup(of: Void.self) { group in
-                    //         // for socket in self.sockets {
-                    //         //     group.addTask {
-                    //         //         do {
-                    //         //             try await socket.write("\(count) connections\n".data(using: .utf8)!)
-                    //         //         } catch {
-                    //         //             socket.socket.file.rawValue.
-                    //         //         }
-                    //         //     }
-                    //         // }
-                    //         for i in 0..<count {
-                    //             let socket = socketsCopy[i]
-                    //             group.addTask {
-                    //                 do {
-                    //                     try await socket.write("\(count) connections\n".data(using: .utf8)!)
-                    //                 } catch {
-                    //                     // toRemove.append(i)
-                    //                 }
-                    //             }
-                    //         }
-                    //     }
-                    //     for index in toRemove.sorted().reversed() {
-                    //         self.sockets.remove(at: index)
-                    //     }
-                    //     try await Task.sleep(nanoseconds: 1000000000)
-                    // }
                 }
             }
         }
@@ -234,74 +146,6 @@ enum TorrentError: Error {
     case nonASCIIProtocol(Data)
     case unknownProtocol(String)
     case unknownInfoHash(InfoHash)
-}
-
-actor TorrentClient {
-    private var torrents: [InfoHash: Torrent] = [:]
-
-    func accept(connection: AsyncSocket) async throws {
-        let protocolLength = try await Int(connection.read(bytes: 1)[0])
-        print("\(protocolLength) byte protocol name")
-        let protocolBytes = try await connection.read(bytes: protocolLength)
-        guard let protocolName = String(bytes: protocolBytes, encoding: .ascii) else {
-            throw TorrentError.nonASCIIProtocol(Data(protocolBytes))
-        }
-        print("Protocol: \(protocolName)")
-        guard protocolName == "BitTorrent Protocol" else {
-            throw TorrentError.unknownProtocol(protocolName)
-        }
-
-        let extensionData = try await connection.read(bytes: 8)
-        print("Extension data: \(extensionData)")
-
-        let infoHashRaw = try await connection.read(bytes: 20)
-        print("Info hash (raw): \(infoHashRaw)")
-        let infoHash = InfoHash.v1(Data(infoHashRaw))
-        print("Info hash: \(infoHash)")
-
-        guard let torrent = self.torrents[infoHash] else {
-            throw TorrentError.unknownInfoHash(infoHash)
-        }
-
-        let peerIDRaw = try await connection.read(bytes: 20)
-        
-        // TODO: send our handshake back
-        try await connection.write("Pretend this is a real BitTorrent handshake\n".data(using: .ascii)!)
-
-        await torrent.accept(connection: connection)
-    }
-
-    func start(torrent: InfoHash) {
-        torrents[torrent] = Torrent()
-    }
-
-    func pause(torrent: InfoHash) async {
-        await torrents[torrent]?.pause()
-    }
-
-    func resume(torrent: InfoHash) async {
-        await torrents[torrent]?.resume()
-    }
-
-    func pauseAll() async {
-        await withTaskGroup(of: Void.self) { group in
-            for (_, torrent) in self.torrents {
-                group.addTask {
-                    await torrent.pause()
-                }
-            }
-        }
-    }
-
-    func resumeAll() async {
-        await withTaskGroup(of: Void.self) { group in
-            for (_, torrent) in self.torrents {
-                group.addTask {
-                    await torrent.resume()
-                }
-            }
-        }
-    }
 }
 
 let client = TorrentClient()
