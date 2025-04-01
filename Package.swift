@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "testbed",
     platforms: [
-        .macOS(.v10_15)
+        .macOS(.v14)
     ],
     dependencies: [
         .package(url: "https://github.com/swhitty/FlyingFox", from: "0.21.0"),
