@@ -16,15 +16,15 @@ extension ExtensionData {
     }
 
     var bytes: Data {
-        Data()
+        Data(repeating: 0, count: 8)
         // TODO: fix this too
     }
 }
 
-enum InfoHash: Hashable, CustomStringConvertible {
+public enum InfoHash: Hashable, Sendable, CustomStringConvertible {
     case v1(Data)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .v1(let data):
             return data.hexEncodedString()
@@ -50,14 +50,14 @@ public actor TorrentClient {
     let peerID: PeerID
     var torrents: [InfoHash: Torrent]
 
+    private let pool: some AsyncSocketPool = .make()
+
     init() {
         self.peerID = PeerID()
         self.torrents = [:]
     }
 
     public func launch() async throws {
-        print("making pool")
-        let pool = SocketPool.make()
         print("preparing pool")
         try await pool.prepare()
         print("creating socket")
@@ -65,7 +65,27 @@ public actor TorrentClient {
         print("disabling SIGPIPE")
         try _socket.setValue(true, for: .noSIGPIPE)
         print("binding to address")
-        do { try _socket.bind(to: .inet(ip4: BIND_ADDRESS, port: BIND_PORT)) } catch { print(error, "Unable to bind to address!"); exit(0) }
+        var bound = false
+        for potentialPort in UInt16(54321)...54329 {
+            do {
+                try _socket.bind(to: .inet(ip4: BIND_ADDRESS, port: potentialPort))
+                print("Bound to port \(potentialPort)")
+                bound = true
+                break
+            } catch let error as SocketError {
+                switch error {
+                case let .failed(type, errno, message):
+                    print(type, errno, message)
+                    if errno == EADDRINUSE {
+                        continue
+                    }
+                default:
+                    print(error, "cannot bind to port")
+                }
+                exit(2)
+            }
+        }
+        if !bound { print("Unable to bind to any port"); exit(2) }
         print("listening")
         do { try _socket.listen() } catch { print(error, "Unable to listen"); exit(0) }
         print("creating async socket")
@@ -74,7 +94,7 @@ public actor TorrentClient {
         print("setup complete")
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
-                try await pool.run()
+                try await self.pool.run()
             }
             group.addTask {
                 try await withThrowingDiscardingTaskGroup { group in
@@ -106,7 +126,26 @@ public actor TorrentClient {
 
         try? await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
 
-        try? await self.postHandshake(for: infoHash, on: connection)
+        try? await self.postHandshake(for: torrent, on: connection)
+    }
+
+    internal func makeConnection(to address: SocketAddress, for torrent: Torrent) {
+        Task {
+            let connection = try await AsyncSocket.connected(to: address, pool: self.pool)
+            defer { try? connection.close() }
+
+            let infoHash = torrent.infoHash
+
+            try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
+
+            let (_, theirInfoHash, peerID) = try await readIncomingHandshake(on: connection)
+
+            guard infoHash == theirInfoHash else {
+                return
+            }
+
+            try? await self.postHandshake(for: torrent, on: connection)
+        }
     }
 
     private func readIncomingHandshake(on connection: AsyncSocket) async throws -> (ExtensionData, InfoHash, PeerID) {
@@ -149,9 +188,9 @@ public actor TorrentClient {
         try await connection.write(data)
     }
 
-    private func postHandshake(for infoHash: InfoHash, on connection: AsyncSocket) async throws {
+    private func postHandshake(for torrent: Torrent, on connection: AsyncSocket) async throws {
         // TODO: implement peer wire protocol
-        while true {
+        while await torrent.isRunning {
             try await Task.sleep(for: .seconds(1))
             try await connection.write("Hello\n".data(using: .ascii)!)
         }
@@ -160,20 +199,133 @@ public actor TorrentClient {
 
 extension TorrentClient {
     func __addTorrentBy(infoHash: InfoHash) {
-        self.torrents[infoHash] = Torrent()
+        self.torrents[infoHash] = Torrent(infoHash: infoHash)
+    }
+}
+
+struct FailedTrackerResponse: Codable {
+    let failureReason: String
+
+    enum CodingKeys: String, CodingKey {
+        case failureReason = "failure reason"
+    }
+}
+struct TrackerResponse: Codable {
+    let interval: Int
+    let trackerID: String?
+    let complete: Int
+    let incomplete: Int
+    let peers: [PeerInfo] //TODO: support compact binary model as well. custom decode function?
+
+    enum CodingKeys: String, CodingKey {
+        case interval, complete, incomplete, peers
+        case trackerID = "tracker id"
+    }
+}
+struct PeerInfo: Codable {
+    let peerID: Data
+    let ip: String
+    let port: UInt16
+
+    enum CodingKeys: String, CodingKey {
+        case ip, port
+        case peerID = "peer id"
     }
 }
 
 let BIND_ADDRESS = "0.0.0.0"
-let BIND_PORT: UInt16 = 12345
 
 public actor Torrent {
-    public var isRunning: Bool = false
+    public var isRunning: Bool = false {
+        didSet {
+            print("torrent with infohash \(self.infoHash) isRunning didSet")
+            // Check that the value actually changed
+            guard oldValue != isRunning else { return }
+
+            // Send start or stop tracker requests
+            Task {
+                try await performTrackerRequest(for: isRunning ? .start : .stop)
+            }
+        }
+    }
+    public let infoHash: InfoHash
+
+    init(infoHash: InfoHash) {
+        self.infoHash = infoHash
+    }
 
     private enum Event: String {
         case start = "started"
         case stop = "stopped"
+        case complete = "completed"
+        case periodic = "empty"
     }
+
+    private func buildTrackerRequest(for event: Event) -> URLRequest {
+        print("Building tracker request for \(event)")
+        // TODO: handle picking the correct tracker
+        var components = URLComponents(string: "https://track.er")!
+        components.queryItems = [
+            URLQueryItem(name: "info_hash", value: self.infoHash.description),
+            URLQueryItem(name: "peer_id", value: ""),
+            URLQueryItem(name: "port", value: ""),
+            URLQueryItem(name: "uploaded", value: String(self.uploaded)),
+            URLQueryItem(name: "downloaded", value: String(self.downloaded)),
+            URLQueryItem(name: "left", value: String(self.left)),
+            URLQueryItem(name: "event", value: event.rawValue),
+        ]
+        if let trackerID = self.trackerID {
+            components.queryItems?.append(URLQueryItem(name: "trackerid", value: trackerID))
+        }
+        guard let url = components.url else {
+            fatalError()
+        }
+        print("Built URL \(url)")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        return req
+    }
+
+    private func performTrackerRequest(for event: Event) async throws {
+        print("Performing tracker request for \(event)")
+        let req = buildTrackerRequest(for: event)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+
+        guard let resp = resp as? HTTPURLResponse else {
+            fatalError("Invalid tracker response to \(event) event")
+        }
+
+        guard resp.statusCode == 200 else {
+            //TODO: also have to handle swapping trackers here
+            fatalError()
+        }
+
+        if let obj = try? BencodeDecoder().decode(FailedTrackerResponse.self, from: data) {
+            fatalError("Tracker request failed with error: \(obj.failureReason)")
+        }
+
+        guard let obj = try? BencodeDecoder().decode(TrackerResponse.self, from: data) else {
+            fatalError()
+        }
+
+        if let trackerID = obj.trackerID {
+            self.trackerID = trackerID
+        }
+
+        Task {
+            try await Task.sleep(for: .seconds(obj.interval))
+            try await performTrackerRequest(for: .periodic)
+        }
+    }
+
+    var uploaded: Int = 0
+    var downloaded: Int = 0
+    var left: Int {
+        0
+    }
+
+    private var trackerID: String?
 
     public func pause() {
         self.isRunning = false
@@ -206,22 +358,28 @@ let ioTask = Task {
                 print("Loading torrent from metainfo file at '\(path)'")
             case "infohash":
                 guard let hash = lit.next() else { continue }
-                let infoHash = InfoHash.v1(hash.data(using: .utf8)!)
+                let data = hash.data(using: .utf8)!
+                guard data.count == 20 else { print("info hash wrong length (was \(data.count), must be 20)"); continue }
+                let infoHash = InfoHash.v1(data)
                 await client.__addTorrentBy(infoHash: infoHash)
                 print("started torrent with info hash \(infoHash)")
             case "list":
                 print("client has torrents with info hashes:")
-                for t in await client.torrents.keys {
-                    print("- \(t)")
+                for (ih, t) in await client.torrents {
+                    print("- \(ih) (\(await t.isRunning ? "running" : "not running"))")
                 }
             case "resume":
                 guard let hash = lit.next() else { continue }
-                let infoHash = InfoHash.v1(hash.data(using: .utf8)!)
+                let data = hash.data(using: .utf8)!
+                guard data.count == 20 else { print("info hash wrong length (was \(data.count), must be 20)"); continue }
+                let infoHash = InfoHash.v1(data)
                 await client.torrents[infoHash]?.resume()
                 print("resuming torrent with info hash \(infoHash)")
             case "pause":
                 guard let hash = lit.next() else { continue }
-                let infoHash = InfoHash.v1(hash.data(using: .utf8)!)
+                let data = hash.data(using: .utf8)!
+                guard data.count == 20 else { print("info hash wrong length (was \(data.count), must be 20)"); continue }
+                let infoHash = InfoHash.v1(data)
                 await client.torrents[infoHash]?.pause()
                 print("pausing torrent with info hash \(infoHash)")
             default:
@@ -264,6 +422,3 @@ let ioTask = Task {
 }
 
 try await client.launch()
-
-print("dM()")
-dispatchMain()
