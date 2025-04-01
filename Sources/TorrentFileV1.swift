@@ -27,4 +27,12 @@ struct TorrentFileV1: Codable {
 
     let announce: String
     let info: InfoDictionary
+
+
+    var length: Int {
+        info.length ?? info.files!.map { $0.length }.reduce(0, +)
+    }
+    var pieceCount: Int {
+        Int( (Double(length)/Double(info.pieceLength)) .rounded(.up) )
+    }
 }

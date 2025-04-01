@@ -31,6 +31,19 @@ extension Data {
             return String(utf16CodeUnits: chars, count: chars.count)
         }
     }
+
+    //from https://stackoverflow.com/a/38024025/8387516
+    init<T>(from value: T) {
+        self = Swift.withUnsafeBytes(of: value) { Data($0) }
+    }
+
+
+    func to<T>(type: T.Type) -> T? where T: ExpressibleByIntegerLiteral {
+        var value: T = 0
+        guard count == MemoryLayout.size(ofValue: value) else { return nil }
+        _ = Swift.withUnsafeMutableBytes(of: &value) { copyBytes(to: $0) }
+        return value
+    }
 }
 
 // https://www.swiftbysundell.com/articles/async-and-concurrent-forEach-and-map/

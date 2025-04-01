@@ -190,6 +190,115 @@ public actor TorrentClient {
 
     private func postHandshake(for torrent: Torrent, on connection: AsyncSocket) async throws {
         // TODO: implement peer wire protocol
+        let torrentFile = await torrent.torrentFile
+        try await withThrowingTaskGroup { group in
+            var peerChoking = false
+            var peerInterested = true
+
+            var peerHaves: Haves = Haves.empty(ofLength: torrentFile.pieceCount)
+
+            var hasReceivedFirstMessage = false
+
+            var localHavesCopy = await torrent.haves
+            async let x = connection.write(localHavesCopy.makeMessage())
+            try await x
+            
+
+            group.addTask {
+                while await torrent.isRunning {
+                    let messageLengthData = try await connection.read(bytes: 4)
+                    let messageLength = UInt32(bigEndian: Data(messageLengthData).to(type: UInt32.self)!)
+                    guard messageLength > 0 else {
+                        // This message is a keep-alive; ignore it
+                        continue
+                    }
+                    let messageData = try await connection.read(bytes: Int(messageLength))
+                    defer { hasReceivedFirstMessage = true }
+
+                    switch messageData[0] {
+                    case 0:
+                        // choke
+                        peerChoking = true
+                    case 1:
+                        // unchoke
+                        peerChoking = false
+                    case 2:
+                        // interested
+                        peerInterested = true
+                    case 3:
+                        // not interested
+                        peerInterested = false
+                    case 4:
+                        // have
+                        let index = UInt32(bigEndian: Data(messageData[1...]).to(type: UInt32.self)!)
+                        peerHaves[index] = true
+                        // TODO: perhaps kick off another request
+                    case 5:
+                        // bitfield
+                        if hasReceivedFirstMessage {
+                            // The original BitTorrent spec (BEP0003) just says "'bitfield' is only ever sent as the first message."
+                            // It doesn't clarify what clients should do if this is violated, but based on other BEPs I believe that
+                            //   clients are supposed to close the connection.
+                            try connection.close()
+                        }
+                        let bitfield = Data(messageData[1...])
+                        peerHaves = Haves(fromBitfield: bitfield, length: peerHaves.length)
+                    case 6:
+                        // request
+                        let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
+                        let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
+                        let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        // TODO: build request and add to set
+                    case 7:
+                        // piece
+                        let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
+                        let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
+                        let piece = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        // TODO: handle piece
+                    case 8:
+                        // cancel
+                        let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
+                        let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
+                        let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        // TODO: build request and remove from set
+                    // FAST EXTENSION
+                    case 0x0D:
+                        try connection.close() // We do not support the fast extension at the moment
+                        // suggest piece
+                    case 0x0E:
+                        try connection.close() // We do not support the fast extension at the moment
+                        // have all
+                        if hasReceivedFirstMessage {
+                            try connection.close()
+                        }
+                        peerHaves = Haves.full(ofLength: peerHaves.length)
+                    case 0x0F:
+                        try connection.close() // We do not support the fast extension at the moment
+                        // have none
+                        if hasReceivedFirstMessage {
+                            try connection.close()
+                        }
+                        peerHaves = Haves.empty(ofLength: peerHaves.length)
+                    case 0x10:
+                        try connection.close() // We do not support the fast extension at the moment
+                        // reject request
+                    case 0x11:
+                        try connection.close() // We do not support the fast extension at the moment
+                        // allowed fast
+                    // END FAST EXTENSION
+                    default:
+                        print("Unknown message type")
+                        try connection.close()
+                        // unknown message type
+                    }
+                }
+            }
+            group.addTask {
+                while await torrent.isRunning {
+                }
+            }
+            try await group.next()
+        }
         while await torrent.isRunning {
             try await Task.sleep(for: .seconds(1))
             try await connection.write("Hello\n".data(using: .ascii)!)
@@ -249,6 +358,7 @@ public actor Torrent {
         }
     }
     public let infoHash: InfoHash
+    let torrentFile: TorrentFileV1
 
     init(infoHash: InfoHash) {
         self.infoHash = infoHash
@@ -326,6 +436,8 @@ public actor Torrent {
     }
 
     private var trackerID: String?
+
+    var haves: Haves
 
     public func pause() {
         self.isRunning = false
