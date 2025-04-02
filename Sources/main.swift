@@ -41,9 +41,21 @@ public enum InfoHash: Hashable, Sendable, CustomStringConvertible {
 }
 
 
-struct PeerID {
-    var bytes: Data {
-        Data()
+struct PeerID: CustomStringConvertible {
+    static func random() -> PeerID {
+        let versionData = "-SG0100-".data(using: .ascii)!
+        let randomData = Data((0..<12).map { _ in UInt8.random(in: UInt8.min...UInt8.max) })
+        let data = versionData + randomData
+        return PeerID(bytes: data)
+    }
+
+    var bytes: Data
+
+    var description: String {
+        let chars = bytes.map { byte in
+            Character(UnicodeScalar(byte))
+        }
+        return String(chars)
     }
 }
 
@@ -54,7 +66,7 @@ public actor TorrentClient {
     private let pool: some AsyncSocketPool = .make()
 
     init() {
-        self.peerID = PeerID()
+        self.peerID = PeerID.random()
         self.torrents = [:]
     }
 
@@ -133,6 +145,7 @@ public actor TorrentClient {
 
     private func accept(connection: AsyncSocket) async {
         // TODO: associate UUID with this connection?
+        // TODO: possibly need to start our part of the handshake immediately after reading the info hash
         let (_, infoHash, peerID) = try! await readIncomingHandshake(on: connection)
 
         guard let torrent = self.torrents[infoHash] else {
@@ -205,8 +218,11 @@ public actor TorrentClient {
         Logger.shared.log("Info hash: \(infoHash)", type: .handshakes)
 
         let peerIDRaw = try await connection.read(bytes: 20)
+        Logger.shared.log("Peer ID (raw): \(peerIDRaw)", type: .handshakes)
+        let peerID = PeerID(bytes: Data(peerIDRaw))
+        Logger.shared.log("Peer ID: \(peerID)", type: .handshakes)
 
-        return (extensionData, infoHash, PeerID())
+        return (extensionData, infoHash, peerID)
     }
 
     private func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on connection: AsyncSocket) async throws {
