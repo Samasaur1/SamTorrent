@@ -153,10 +153,18 @@ public actor TorrentClient {
         self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf, peerID: self.peerID, port: self.port)
     }
 
-    private func accept(connection: AsyncSocket) async {
+    private func accept(connection: AsyncSocket) async throws {
         // TODO: associate UUID with this connection?
         // TODO: possibly need to start our part of the handshake immediately after reading the info hash
-        let (_, infoHash, peerID) = try! await readIncomingHandshake(on: connection)
+        let infoHash: InfoHash
+        let peerID: PeerID
+        do {
+            (_, infoHash, peerID) = try await readIncomingHandshake(on: connection)
+            Logger.shared.warn("Read incoming handshake for incoming connection with \(peerID)", type: .incomingConnections)
+        } catch {
+            Logger.shared.warn("Unable to read incoming handshake for incoming connection", type: .incomingConnections)
+            throw error
+        }
 
         guard let torrent = self.torrents[infoHash] else {
             Logger.shared.warn("no torrent with info hash", type: .incomingConnections)
@@ -168,9 +176,21 @@ public actor TorrentClient {
             return
         }
 
-        try? await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
+        do {
+            try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
+            Logger.shared.log("Wrote outgoing handshake for incoming connection with \(peerID)", type: .incomingConnections)
+        } catch {
+            Logger.shared.warn("Unable to write outgoing handshake for incoming connection with \(peerID)", type: .incomingConnections)
+            throw error
+        }
 
-        try? await self.postHandshake(for: torrent, on: connection)
+        do {
+            try await self.postHandshake(for: torrent, on: connection)
+            Logger.shared.log("Connection to peer \(peerID) gracefully shut down", type: .incomingConnections)
+        } catch {
+            Logger.shared.warn("Connection to peer \(peerID) failed", type: .incomingConnections)
+            throw error
+        }
     }
 
     internal func makeConnection(to address: SocketAddress, for torrent: Torrent) {
@@ -189,7 +209,13 @@ public actor TorrentClient {
 
             let infoHash = torrent.infoHash
 
-            try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
+            do {
+                try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
+                Logger.shared.log("Wrote outgoing handshake for outgoing connection", type: .outgoingConnections)
+            } catch {
+                Logger.shared.warn("Unable to write outgoing handshake for outgoing connection", type: .outgoingConnections)
+                throw error
+            }
 
             let (_, theirInfoHash, peerID) = try await readIncomingHandshake(on: connection)
             Logger.shared.log("Connection to \(address) has peer ID \(peerID)", type: .outgoingConnections)
