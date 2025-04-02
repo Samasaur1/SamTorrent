@@ -1,6 +1,7 @@
 import Foundation
 import FlyingSocks
 import BencodeKit
+import CryptoKit
 
 struct ExtensionData: OptionSet {
     let rawValue: UInt64
@@ -119,6 +120,15 @@ public actor TorrentClient {
             }
             try await group.next()
         }
+    }
+
+    // TODO: make public
+    // TODO: this should probably take a file and not a TorrentFile object
+    /* public */ func addTorrent(from tf: TorrentFileV1) throws {
+        let infoDictEncoded = try BencodeEncoder().encode(tf.info)
+        let ih = Data(Insecure.SHA1.hash(data: infoDictEncoded))
+        let infoHash = InfoHash.v1(ih)
+        self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf)
     }
 
     private func accept(connection: AsyncSocket) async {
@@ -334,18 +344,18 @@ public actor TorrentClient {
             }
             try await group.next()
         }
-        while await torrent.isRunning {
-            try await Task.sleep(for: .seconds(1))
-            try await connection.write("Hello\n".data(using: .ascii)!)
-        }
+        // while await torrent.isRunning {
+        //     try await Task.sleep(for: .seconds(1))
+        //     try await connection.write("Hello\n".data(using: .ascii)!)
+        // }
     }
 }
-
-extension TorrentClient {
-    func __addTorrentBy(infoHash: InfoHash) {
-        self.torrents[infoHash] = Torrent(infoHash: infoHash)
-    }
-}
+//
+// extension TorrentClient {
+//     func __addTorrentBy(infoHash: InfoHash) {
+//         self.torrents[infoHash] = Torrent(infoHash: infoHash)
+//     }
+// }
 
 struct FailedTrackerResponse: Codable {
     let failureReason: String
@@ -396,8 +406,10 @@ public actor Torrent {
     public let infoHash: InfoHash
     let torrentFile: TorrentFileV1
 
-    init(infoHash: InfoHash) {
+    init(infoHash: InfoHash, torrentFile: TorrentFileV1) {
         self.infoHash = infoHash
+        self.torrentFile = torrentFile
+        self.haves = Haves.empty(ofLength: torrentFile.pieceCount)
     }
 
     private enum Event: String {
@@ -523,13 +535,28 @@ let ioTask = Task {
             case "torrentfile":
                 let path = lit.joined(separator: " ")
                 print("Loading torrent from metainfo file at '\(path)'")
-            case "infohash":
-                guard let hash = lit.next() else { continue }
-                let data = hash.data(using: .utf8)!
-                guard data.count == 20 else { print("info hash wrong length (was \(data.count), must be 20)"); continue }
-                let infoHash = InfoHash.v1(data)
-                await client.__addTorrentBy(infoHash: infoHash)
-                print("started torrent with info hash \(infoHash)")
+                guard let url = URL(string: path) else {
+                    print("cannot construct URL from path")
+                    continue
+                }
+                print("converted path to URL \(url)")
+                print("file at path \(url.path) exists: \(FileManager.default.fileExists(atPath: url.path))")
+                guard let data = FileManager.default.contents(atPath: url.path) else {
+                    print("cannot load torrent file")
+                    continue
+                }
+                guard let tf = try? BencodeDecoder().decode(TorrentFileV1.self, from: data) else {
+                    print("cannot decode torrent file")
+                    continue
+                }
+                try await client.addTorrent(from: tf)
+            // case "infohash":
+            //     guard let hash = lit.next() else { continue }
+            //     let data = hash.data(using: .utf8)!
+            //     guard data.count == 20 else { print("info hash wrong length (was \(data.count), must be 20)"); continue }
+            //     let infoHash = InfoHash.v1(data)
+            //     await client.__addTorrentBy(infoHash: infoHash)
+            //     print("started torrent with info hash \(infoHash)")
             case "list":
                 print("client has torrents with info hashes:")
                 for (ih, t) in await client.torrents {
@@ -549,6 +576,24 @@ let ioTask = Task {
                 let infoHash = InfoHash.v1(data)
                 await client.torrents[infoHash]?.pause()
                 print("pausing torrent with info hash \(infoHash)")
+            case "resumeall":
+                await withTaskGroup(of: Void.self) { group in
+                    for (infoHash, torrent) in await client.torrents {
+                        group.addTask {
+                            await torrent.resume()
+                            print("\(infoHash) resumed")
+                        }
+                    }
+                }
+            case "pauseall":
+                await withTaskGroup(of: Void.self) { group in
+                    for (infoHash, torrent) in await client.torrents {
+                        group.addTask {
+                            await torrent.pause()
+                            print("\(infoHash) paused")
+                        }
+                    }
+                }
             default:
                 print("unknown command")
                 continue
