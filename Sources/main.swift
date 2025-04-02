@@ -1,7 +1,7 @@
 import Foundation
 import FlyingSocks
 import BencodeKit
-import CryptoKit
+import Crypto
 
 struct ExtensionData: OptionSet {
     let rawValue: UInt64
