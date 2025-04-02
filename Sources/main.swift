@@ -95,7 +95,7 @@ public actor TorrentClient {
         do {
             try _socket.listen()
         } catch {
-            Logger.shared.error("Unable to listen", type: .setup)
+            Logger.shared.error("Unable to listen (error: \(error))", type: .setup)
             exit(2)
         }
         Logger.shared.log("creating async socket", type: .setup)
@@ -159,7 +159,7 @@ public actor TorrentClient {
                 connection = try await AsyncSocket.connected(to: address, pool: self.pool)
                 Logger.shared.log("Connected to \(address)", type: .outgoingConnections)
             } catch {
-                Logger.shared.warn("Unable to connect to \(address)", type: .outgoingConnections)
+                Logger.shared.warn("Unable to connect to \(address) (error: \(error))", type: .outgoingConnections)
                 throw error
             }
             defer { try? connection.close() }
@@ -255,19 +255,24 @@ public actor TorrentClient {
                     case 0:
                         // choke
                         peerChoking = true
+                        Logger.shared.log("Peer is now choking us", type: .peerCommunication)
                     case 1:
                         // unchoke
                         peerChoking = false
+                        Logger.shared.log("Peer is no longer choking us", type: .peerCommunication)
                     case 2:
                         // interested
                         peerInterested = true
+                        Logger.shared.log("Peer is now interested in us", type: .peerCommunication)
                     case 3:
                         // not interested
                         peerInterested = false
+                        Logger.shared.log("Peer is no longer interested in us", type: .peerCommunication)
                     case 4:
                         // have
                         let index = UInt32(bigEndian: Data(messageData[1...]).to(type: UInt32.self)!)
                         peerHaves[index] = true
+                        Logger.shared.log("Peer now has piece \(index)", type: .peerCommunication)
                         // TODO: perhaps kick off another request
                     case 5:
                         // bitfield
@@ -277,9 +282,11 @@ public actor TorrentClient {
                             //   clients are supposed to close the connection.
                             Logger.shared.warn("Recieved bitfield that was not the first message; closing connection", type: .peerCommunication)
                             try connection.close()
+                            return // TODO: return or something else?
                         }
                         let bitfield = Data(messageData[1...])
                         peerHaves = Haves(fromBitfield: bitfield, length: peerHaves.length)
+                        Logger.shared.log("Peer sent bitfield (has \(localHavesCopy.percentComplete, stringFormat: "%.2f")% of the file)", type: .peerCommunication)
                     case 6:
                         // request
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
@@ -458,7 +465,7 @@ public actor Torrent {
         do {
             (data, resp) = try await URLSession.shared.data(for: req)
         } catch {
-            Logger.shared.error("Tracker request failed", type: .trackerRequests)
+            Logger.shared.error("Tracker request failed with error: \(error)", type: .trackerRequests)
             fatalError("This shouldn't be an error at the end, but is for now")
         }
 
