@@ -1,5 +1,5 @@
 {
-  "originHash" : "0d7afab8937f679a554ed7255f9ca338bd5b9353c32dfd28f652b7fda4e116fa",
+  "originHash" : "09b7b7836d9f7d997a744d443296aae01600e87ed016553614f40b3066d3812a",
   "pins" : [
     {
       "identity" : "bencodekit",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "0285d3e846f48abad71d4cf143afacbc33b19b45",
         "version" : "0.21.0"
+      }
+    },
+    {
+      "identity" : "rainbow",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/onevcat/Rainbow",
+      "state" : {
+        "revision" : "0c627a4f8a39ef37eadec1ceec02e4a7f55561ac",
+        "version" : "4.1.0"
       }
     }
   ],

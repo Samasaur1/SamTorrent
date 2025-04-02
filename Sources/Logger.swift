@@ -1,4 +1,5 @@
 import Foundation
+import Rainbow
 
 public struct Logger: Sendable {
     public enum LogType: CaseIterable, Sendable {
@@ -9,6 +10,25 @@ public struct Logger: Sendable {
         case peerCommunication
         case trackerRequests
         case verifyingPieces
+
+        var logPrefix: String {
+            switch self {
+            case .setup:
+                return "SETUP"
+            case .incomingConnections:
+                return "RECVX"
+            case .outgoingConnections:
+                return "SENDX"
+            case .handshakes:
+                return "SHAKE"
+            case .peerCommunication:
+                return "PEERX"
+            case .trackerRequests:
+                return "TRACK"
+            case .verifyingPieces:
+                return "VERFY"
+            }
+        }
     }
 
     static let shared = Logger(LogType.allCases)
@@ -21,17 +41,17 @@ public struct Logger: Sendable {
 
     func error(_ msg: String, type: LogType) {
         if allowedLogTypes.contains(type) {
-            print(msg)
+            print("[\(type.logPrefix)]:".bold.red, msg)
         }
     }
     func warn(_ msg: String, type: LogType) {
         if allowedLogTypes.contains(type) {
-            print(msg)
+            print("[\(type.logPrefix)]:".bold.yellow, msg)
         }
     }
     func log(_ msg: String, type: LogType) {
         if allowedLogTypes.contains(type) {
-            print(msg)
+            print("[\(type.logPrefix)]:".bold, msg)
         }
     }
 }

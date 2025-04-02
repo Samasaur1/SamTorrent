@@ -74,3 +74,9 @@ extension Sequence {
     //     }
     // }
 }
+
+extension String.StringInterpolation {
+    mutating func appendInterpolation(_ value: Double, stringFormat: String) {
+        appendLiteral(String(format: stringFormat, value))
+    }
+}

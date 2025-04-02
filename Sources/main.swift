@@ -75,19 +75,28 @@ public actor TorrentClient {
             } catch let error as SocketError {
                 switch error {
                 case let .failed(type, errno, message):
-                    Logger.shared.log(type, errno, message, type: .setup)
                     if errno == EADDRINUSE {
+                        Logger.shared.warn("Failed to bind to potential port \(potentialPort) (in use)", type: .setup)
                         continue
                     }
+                    Logger.shared.error("\(type) \(message) (\(errno))", type: .setup)
                 default:
-                    print(error, "cannot bind to port")
+                    Logger.shared.error("Cannot bind to port: \(error)", type: .setup)
                 }
                 exit(2)
             }
         }
-        if !bound { print("Unable to bind to any port"); exit(2) }
+        if !bound {
+            Logger.shared.error("Unable to bind to any port", type: .setup)
+            exit(2)
+        }
         Logger.shared.log("listening", type: .setup)
-        do { try _socket.listen() } catch { print(error, "Unable to listen"); exit(0) }
+        do {
+            try _socket.listen()
+        } catch {
+            Logger.shared.error("Unable to listen", type: .setup)
+            exit(2)
+        }
         Logger.shared.log("creating async socket", type: .setup)
         let serverSocket = try AsyncSocket(socket: _socket, pool: pool)
 
@@ -99,6 +108,7 @@ public actor TorrentClient {
             group.addTask {
                 try await withThrowingDiscardingTaskGroup { group in
                     for try await conn in serverSocket.sockets {
+                        Logger.shared.log("Got incoming connection", type: .incomingConnections)
                         group.addTask {
                             defer { try? conn.close() }
                             await self.accept(connection: conn)
@@ -112,15 +122,16 @@ public actor TorrentClient {
     }
 
     private func accept(connection: AsyncSocket) async {
+        // TODO: associate UUID with this connection?
         let (_, infoHash, peerID) = try! await readIncomingHandshake(on: connection)
 
         guard let torrent = self.torrents[infoHash] else {
-            Logger.shared.log("no torrent with info hash", type: .incomingConnections)
+            Logger.shared.warn("no torrent with info hash", type: .incomingConnections)
             return
         }
 
         guard await torrent.isRunning else {
-            Logger.shared.log("torrent is not running", type: .incomingConnections)
+            Logger.shared.warn("torrent is not running", type: .incomingConnections)
             return
         }
 
@@ -131,7 +142,16 @@ public actor TorrentClient {
 
     internal func makeConnection(to address: SocketAddress, for torrent: Torrent) {
         Task {
-            let connection = try await AsyncSocket.connected(to: address, pool: self.pool)
+            // TODO: associate UUID with this connection attempt?
+            Logger.shared.log("Attempting to connect to \(address)", type: .outgoingConnections)
+            let connection: AsyncSocket
+            do {
+                connection = try await AsyncSocket.connected(to: address, pool: self.pool)
+                Logger.shared.log("Connected to \(address)", type: .outgoingConnections)
+            } catch {
+                Logger.shared.warn("Unable to connect to \(address)", type: .outgoingConnections)
+                throw error
+            }
             defer { try? connection.close() }
 
             let infoHash = torrent.infoHash
@@ -139,8 +159,10 @@ public actor TorrentClient {
             try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
 
             let (_, theirInfoHash, peerID) = try await readIncomingHandshake(on: connection)
+            Logger.shared.log("Connection to \(address) has peer ID \(peerID)", type: .outgoingConnections)
 
             guard infoHash == theirInfoHash else {
+                Logger.shared.warn("Connection to \(address) with peerID \(peerID) has incorrect info hash \(theirInfoHash) (expected \(infoHash))", type: .outgoingConnections)
                 return
             }
 
@@ -153,10 +175,12 @@ public actor TorrentClient {
         Logger.shared.log("\(protocolLength) byte protocol name", type: .handshakes)
         let protocolBytes = try await connection.read(bytes: protocolLength)
         guard let protocolName = String(bytes: protocolBytes, encoding: .ascii) else {
+            Logger.shared.error("Cannot decode P2P protocol name (i.e., it is non-ASCII)", type: .handshakes)
             throw TorrentError.nonASCIIProtocol(Data(protocolBytes))
         }
         Logger.shared.log("Protocol: \(protocolName)", type: .handshakes)
         guard protocolName == "BitTorrent Protocol" else {
+            Logger.shared.error("P2P protocol is '\(protocolName)', not 'BitTorrent Protocol'", type: .handshakes)
             throw TorrentError.unknownProtocol(protocolName)
         }
 
@@ -185,6 +209,7 @@ public actor TorrentClient {
 
         data.append(peerID.bytes)
 
+        Logger.shared.log("Writing outgoing handshake with infoHash \(infoHash) to \(peerID)", type: .handshakes)
         try await connection.write(data)
     }
 
@@ -200,6 +225,7 @@ public actor TorrentClient {
             var hasReceivedFirstMessage = false
 
             var localHavesCopy = await torrent.haves
+            Logger.shared.log("Writing initial bitfield \(localHavesCopy.percentComplete, stringFormat: "%.2f")", type: .peerCommunication)
             async let x = connection.write(localHavesCopy.makeMessage())
             try await x
             
@@ -239,6 +265,7 @@ public actor TorrentClient {
                             // The original BitTorrent spec (BEP0003) just says "'bitfield' is only ever sent as the first message."
                             // It doesn't clarify what clients should do if this is violated, but based on other BEPs I believe that
                             //   clients are supposed to close the connection.
+                            Logger.shared.warn("Recieved bitfield that was not the first message; closing connection", type: .peerCommunication)
                             try connection.close()
                         }
                         let bitfield = Data(messageData[1...])
@@ -248,24 +275,29 @@ public actor TorrentClient {
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        Logger.shared.log("Got request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: build request and add to set
                     case 7:
                         // piece
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        Logger.shared.log("Got piece at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: handle piece
                     case 8:
                         // cancel
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        Logger.shared.log("Got cancellation of previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: build request and remove from set
                     // FAST EXTENSION
                     case 0x0D:
+                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                         try connection.close() // We do not support the fast extension at the moment
                         // suggest piece
                     case 0x0E:
+                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                         try connection.close() // We do not support the fast extension at the moment
                         // have all
                         if hasReceivedFirstMessage {
@@ -273,6 +305,7 @@ public actor TorrentClient {
                         }
                         peerHaves = Haves.full(ofLength: peerHaves.length)
                     case 0x0F:
+                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                         try connection.close() // We do not support the fast extension at the moment
                         // have none
                         if hasReceivedFirstMessage {
@@ -280,14 +313,16 @@ public actor TorrentClient {
                         }
                         peerHaves = Haves.empty(ofLength: peerHaves.length)
                     case 0x10:
+                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                         try connection.close() // We do not support the fast extension at the moment
                         // reject request
                     case 0x11:
+                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                         try connection.close() // We do not support the fast extension at the moment
                         // allowed fast
                     // END FAST EXTENSION
                     default:
-                        Logger.shared.log("Unknown message type", type: .peerCommunication)
+                        Logger.shared.warn("Unknown message type", type: .peerCommunication)
                         try connection.close()
                         // unknown message type
                     }
@@ -347,6 +382,7 @@ let BIND_ADDRESS = "0.0.0.0"
 public actor Torrent {
     public var isRunning: Bool = false {
         didSet {
+            // TODO: convert to logger
             print("torrent with infohash \(self.infoHash) isRunning didSet")
             // Check that the value actually changed
             guard oldValue != isRunning else { return }
@@ -371,10 +407,13 @@ public actor Torrent {
         case periodic = "empty"
     }
 
-    private func buildTrackerRequest(for event: Event) -> URLRequest {
+    private func buildTrackerRequest(for event: Event) throws -> URLRequest {
         Logger.shared.log("Building tracker request for \(event)", type: .trackerRequests)
         // TODO: handle picking the correct tracker
-        var components = URLComponents(string: "https://track.er")!
+        guard var components = URLComponents(string: self.torrentFile.announce) else {
+            Logger.shared.error("Cannot construct URLComponents from announce URL", type: .trackerRequests)
+            throw TorrentError.invalidAnnounceURL(self.torrentFile.announce)
+        }
         components.queryItems = [
             URLQueryItem(name: "info_hash", value: self.infoHash.description),
             URLQueryItem(name: "peer_id", value: ""),
@@ -385,9 +424,11 @@ public actor Torrent {
             URLQueryItem(name: "event", value: event.rawValue),
         ]
         if let trackerID = self.trackerID {
+            // TODO: more logging?
             components.queryItems?.append(URLQueryItem(name: "trackerid", value: trackerID))
         }
         guard let url = components.url else {
+            Logger.shared.error("Cannot build URL from components", type: .trackerRequests)
             fatalError()
         }
         Logger.shared.log("Built URL \(url)", type: .trackerRequests)
@@ -398,32 +439,45 @@ public actor Torrent {
 
     private func performTrackerRequest(for event: Event) async throws {
         Logger.shared.log("Performing tracker request for \(event)", type: .trackerRequests)
-        let req = buildTrackerRequest(for: event)
+        let req = try buildTrackerRequest(for: event)
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await URLSession.shared.data(for: req)
+        } catch {
+            Logger.shared.error("Tracker request failed", type: .trackerRequests)
+            fatalError("This shouldn't be an error at the end, but is for now")
+        }
 
         guard let resp = resp as? HTTPURLResponse else {
+            Logger.shared.error("Invalid (non-HTTP) \(event) tracker response", type: .trackerRequests)
             fatalError("Invalid tracker response to \(event) event")
         }
 
         guard resp.statusCode == 200 else {
             //TODO: also have to handle swapping trackers here
+            Logger.shared.error("Non-200 \(event) tracker response", type: .trackerRequests)
             fatalError()
         }
 
         if let obj = try? BencodeDecoder().decode(FailedTrackerResponse.self, from: data) {
+            Logger.shared.error("\(event) tracker request failed with error: \(obj.failureReason)", type: .trackerRequests)
             fatalError("Tracker request failed with error: \(obj.failureReason)")
         }
 
         guard let obj = try? BencodeDecoder().decode(TrackerResponse.self, from: data) else {
+            Logger.shared.error("Cannot decode \(event) tracker response", type: .trackerRequests)
             fatalError()
         }
 
         if let trackerID = obj.trackerID {
+            Logger.shared.log("Tracker ID now set to \(trackerID)", type: .trackerRequests)
             self.trackerID = trackerID
         }
 
         Task {
+            Logger.shared.log("Sleeping for \(obj.interval) seconds before periodic request", type: .trackerRequests)
             try await Task.sleep(for: .seconds(obj.interval))
             try await performTrackerRequest(for: .periodic)
         }
@@ -452,6 +506,7 @@ enum TorrentError: Error {
     case nonASCIIProtocol(Data)
     case unknownProtocol(String)
     case unknownInfoHash(InfoHash)
+    case invalidAnnounceURL(String)
 }
 
 let client = TorrentClient()

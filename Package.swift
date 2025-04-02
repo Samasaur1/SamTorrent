@@ -11,6 +11,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/swhitty/FlyingFox", from: "0.21.0"),
         .package(url: "https://github.com/Samasaur1/BencodeKit", branch: "main"),
+        .package(url: "https://github.com/onevcat/Rainbow", from: "4.0.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -20,6 +21,7 @@ let package = Package(
             dependencies: [
                 .product(name: "FlyingSocks", package: "FlyingFox"),
                 .product(name: "BencodeKit", package: "BencodeKit"),
+                .product(name: "Rainbow", package: "Rainbow"),
             ]
         ),
     ]
