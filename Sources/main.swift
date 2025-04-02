@@ -469,8 +469,10 @@ public actor Torrent {
             URLQueryItem(name: "uploaded", value: String(self.uploaded)),
             URLQueryItem(name: "downloaded", value: String(self.downloaded)),
             URLQueryItem(name: "left", value: String(self.left)),
-            URLQueryItem(name: "event", value: event.rawValue),
         ]
+        if event != .periodic {
+            components.queryItems?.append(URLQueryItem(name: "event", value: event.rawValue))
+        }
         if let trackerID = self.trackerID {
             // TODO: more logging?
             components.queryItems?.append(URLQueryItem(name: "trackerid", value: trackerID))
