@@ -551,6 +551,26 @@ public actor Torrent {
             fatalError()
         }
 
+        Logger.shared.log("Tracker response: \(obj.complete) complete, \(obj.incomplete) incomplete, \(obj.peers.count) peers (first peer \(obj.peers.first?.ip):\(obj.peers.first?.port))", type: .trackerRequests)
+        obj.peers.prefix(upTo: 5).map { peerInfo in
+            let addr: SocketAddress
+            do {
+                addr = try .inet(ip4: peerInfo.ip, port: peerInfo.port)
+                Logger.shared.log("Created IPv4 SocketAddress from peer \(peerInfo.peerID)", type: .outgoingConnections)
+            } catch {
+                do {
+                    addr = try .inet6(ip6: peerInfo.ip, port: peerInfo.port)
+                    Logger.shared.log("Created IPv6 SocketAddress from peer \(peerInfo.peerID)", type: .outgoingConnections)
+                } catch {
+                    Logger.shared.warn("Unable to create SocketAddress from peer \(peerInfo.peerID)", type: .outgoingConnections)
+                    return
+                }
+            }
+            Task {
+                await client.makeConnection(to: addr, for: self)
+            }
+        }
+
         if let trackerID = obj.trackerID {
             Logger.shared.log("Tracker ID now set to \(trackerID)", type: .trackerRequests)
             self.trackerID = trackerID
