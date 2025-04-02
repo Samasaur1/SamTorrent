@@ -11,7 +11,7 @@ struct ExtensionData: OptionSet {
     static let supportedByMe: ExtensionData = []
 }
 extension ExtensionData {
-    init(from bytes: [UInt8]) {
+    init(from bytes: Data) {
         rawValue = unsafeBitCast(bytes, to: UInt64.self)
         // TODO: fix this
     }
@@ -64,6 +64,38 @@ struct PeerID: CustomStringConvertible {
 
     func percentEncoded() -> String {
         bytes.percentEncoded()
+    }
+}
+
+public struct Connection: Sendable, CustomStringConvertible {
+    let uuid: UUID
+    var peerID: PeerID! = nil
+
+    let socket: AsyncSocket
+
+    init(wrapping socket: AsyncSocket, with uuid: UUID = UUID()) {
+        self.socket = socket
+        self.uuid = uuid
+    }
+
+    public var description: String {
+        return if let p = peerID {
+            "\(uuid.uuidString) (\(p))"
+        } else {
+            uuid.uuidString
+        }
+    }
+
+    func close() throws {
+        try socket.close()
+    }
+    func read(bytes: Int) async throws -> Data {
+        let arr = try await self.socket.read(bytes: bytes)
+        // TODO: use Data(bytesNoCopy:count:deallocator:) ?
+        return Data(arr)
+    }
+    func write(_ data: Data) async throws {
+        try await self.socket.write(data)
     }
 }
 
@@ -130,11 +162,13 @@ public actor TorrentClient {
             }
             group.addTask {
                 try await withThrowingDiscardingTaskGroup { group in
-                    for try await conn in serverSocket.sockets {
-                        Logger.shared.log("Got incoming connection", type: .incomingConnections)
+                    for try await _conn in serverSocket.sockets {
+                        var conn = Connection(wrapping: _conn)
+                        Logger.shared.log("Got incoming connection \(conn)", type: .incomingConnections)
                         group.addTask {
                             defer { try? conn.close() }
-                            await self.accept(connection: conn)
+                            try await self.accept(connection: &conn)
+                            Logger.shared.log("Connection \(conn) closed gracefully", type: .incomingConnections)
                         }
                     }
                 }
@@ -153,54 +187,52 @@ public actor TorrentClient {
         self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf, peerID: self.peerID, port: self.port)
     }
 
-    private func accept(connection: AsyncSocket) async throws {
-        // TODO: associate UUID with this connection?
+    private func accept(connection: inout Connection) async throws {
         // TODO: possibly need to start our part of the handshake immediately after reading the info hash
         let infoHash: InfoHash
-        let peerID: PeerID
         do {
-            (_, infoHash, peerID) = try await readIncomingHandshake(on: connection)
-            Logger.shared.warn("Read incoming handshake for incoming connection with \(peerID)", type: .incomingConnections)
+            (_, infoHash, connection.peerID) = try await readIncomingHandshake(on: connection)
+            Logger.shared.log("Read incoming handshake for incoming connection \(connection)", type: .incomingConnections)
         } catch {
-            Logger.shared.warn("Unable to read incoming handshake for incoming connection", type: .incomingConnections)
+            Logger.shared.warn("Unable to read incoming handshake for incoming connection \(connection)", type: .incomingConnections)
             throw error
         }
 
         guard let torrent = self.torrents[infoHash] else {
-            Logger.shared.warn("no torrent with info hash", type: .incomingConnections)
+            Logger.shared.warn("Incoming connection \(connection) wants to paricipate in a torrent that we aren't participating in", type: .incomingConnections)
             return
         }
 
         guard await torrent.isRunning else {
-            Logger.shared.warn("torrent is not running", type: .incomingConnections)
+            Logger.shared.warn("Incoming connection \(connection) wants to participate in a torrent that we have paused", type: .incomingConnections)
             return
         }
 
         do {
             try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
-            Logger.shared.log("Wrote outgoing handshake for incoming connection with \(peerID)", type: .incomingConnections)
+            Logger.shared.log("Wrote outgoing handshake for incoming connection \(connection)", type: .incomingConnections)
         } catch {
-            Logger.shared.warn("Unable to write outgoing handshake for incoming connection with \(peerID)", type: .incomingConnections)
+            Logger.shared.warn("Unable to write outgoing handshake for incoming connection \(connection)", type: .incomingConnections)
             throw error
         }
 
         do {
             try await self.postHandshake(for: torrent, on: connection)
-            Logger.shared.log("Connection to peer \(peerID) gracefully shut down", type: .incomingConnections)
         } catch {
-            Logger.shared.warn("Connection to peer \(peerID) failed", type: .incomingConnections)
+            Logger.shared.warn("P2P communication with \(connection) exited with an error", type: .incomingConnections)
             throw error
         }
     }
 
     internal func makeConnection(to address: SocketAddress, for torrent: Torrent) {
+        let uuid = UUID()
         Task {
-            // TODO: associate UUID with this connection attempt?
-            Logger.shared.log("Attempting to connect to \(address)", type: .outgoingConnections)
-            let connection: AsyncSocket
+            Logger.shared.log("Attempting to connect to \(address) (will be connection \(uuid.uuidString))", type: .outgoingConnections)
+            var connection: Connection
             do {
-                connection = try await AsyncSocket.connected(to: address, pool: self.pool)
-                Logger.shared.log("Connected to \(address)", type: .outgoingConnections)
+                let socket = try await AsyncSocket.connected(to: address, pool: self.pool)
+                connection = Connection(wrapping: socket, with: uuid)
+                Logger.shared.log("Connected to \(address) on connection \(connection)", type: .outgoingConnections)
             } catch {
                 Logger.shared.warn("Unable to connect to \(address) (error: \(error))", type: .outgoingConnections)
                 throw error
@@ -211,57 +243,68 @@ public actor TorrentClient {
 
             do {
                 try await writeOutgoingHandshake(for: infoHash, with: self.peerID, on: connection)
-                Logger.shared.log("Wrote outgoing handshake for outgoing connection", type: .outgoingConnections)
+                Logger.shared.log("Wrote outgoing handshake for outgoing connection \(connection)", type: .outgoingConnections)
             } catch {
-                Logger.shared.warn("Unable to write outgoing handshake for outgoing connection", type: .outgoingConnections)
+                Logger.shared.warn("Unable to write outgoing handshake for outgoing connection \(connection)", type: .outgoingConnections)
                 throw error
             }
 
-            let (_, theirInfoHash, peerID) = try await readIncomingHandshake(on: connection)
-            Logger.shared.log("Connection to \(address) has peer ID \(peerID)", type: .outgoingConnections)
+            let theirInfoHash: InfoHash
+            do {
+                (_, theirInfoHash, connection.peerID) = try await readIncomingHandshake(on: connection)
+                Logger.shared.log("Read incoming handshake for outgoing connection \(connection)", type: .outgoingConnections)
+            } catch {
+                Logger.shared.warn("Unable to read incoming handshake for outgoing connection \(connection)", type: .outgoingConnections)
+                throw error
+            }
 
             guard infoHash == theirInfoHash else {
-                Logger.shared.warn("Connection to \(address) with peerID \(peerID) has incorrect info hash \(theirInfoHash) (expected \(infoHash))", type: .outgoingConnections)
+                Logger.shared.warn("Connection \(connection) has incorrect info hash \(theirInfoHash) (expected \(infoHash))", type: .outgoingConnections)
                 return
             }
 
-            try? await self.postHandshake(for: torrent, on: connection)
+            do {
+                try await self.postHandshake(for: torrent, on: connection)
+            } catch {
+                Logger.shared.warn("P2P communication with \(connection) exited with an error", type: .outgoingConnections)
+                throw error
+            }
         }
     }
 
-    private func readIncomingHandshake(on connection: AsyncSocket) async throws -> (ExtensionData, InfoHash, PeerID) {
+    private func readIncomingHandshake(on connection: Connection) async throws -> (ExtensionData, InfoHash, PeerID) {
         let protocolLength = try await Int(connection.read(bytes: 1)[0])
-        Logger.shared.log("\(protocolLength) byte protocol name", type: .handshakes)
+        Logger.shared.log("Connection \(connection) had a \(protocolLength) byte protocol name", type: .handshakes)
         let protocolBytes = try await connection.read(bytes: protocolLength)
         guard let protocolName = String(bytes: protocolBytes, encoding: .ascii) else {
-            Logger.shared.error("Cannot decode P2P protocol name (i.e., it is non-ASCII)", type: .handshakes)
+            Logger.shared.error("Cannot decode P2P protocol name (i.e., it is non-ASCII) on connection \(connection)", type: .handshakes)
             throw TorrentError.nonASCIIProtocol(Data(protocolBytes))
         }
-        Logger.shared.log("Protocol: \(protocolName)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) wants to use protocol: \(protocolName)", type: .handshakes)
         guard protocolName == "BitTorrent Protocol" else {
-            Logger.shared.error("P2P protocol is '\(protocolName)', not 'BitTorrent Protocol'", type: .handshakes)
+            Logger.shared.error("Connection \(connection)'s desired P2P protocol is '\(protocolName)', not 'BitTorrent Protocol'", type: .handshakes)
             throw TorrentError.unknownProtocol(protocolName)
         }
 
         let extensionDataRaw = try await connection.read(bytes: 8)
-        Logger.shared.log("Extension data (raw): \(extensionDataRaw)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has raw extension data: \(extensionDataRaw)", type: .handshakes)
         let extensionData = ExtensionData(from: extensionDataRaw)
-        Logger.shared.log("Extension data: \(extensionData)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has extension data: \(extensionData)", type: .handshakes)
 
         let infoHashRaw = try await connection.read(bytes: 20)
-        Logger.shared.log("Info hash (raw): \(infoHashRaw)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has raw info hash: \(infoHashRaw)", type: .handshakes)
         let infoHash = InfoHash.v1(Data(infoHashRaw))
-        Logger.shared.log("Info hash: \(infoHash)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has info hash: \(infoHash)", type: .handshakes)
 
         let peerIDRaw = try await connection.read(bytes: 20)
-        Logger.shared.log("Peer ID (raw): \(peerIDRaw)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has raw peer ID: \(peerIDRaw)", type: .handshakes)
         let peerID = PeerID(bytes: Data(peerIDRaw))
-        Logger.shared.log("Peer ID: \(peerID)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has peer ID: \(peerID)", type: .handshakes)
 
         return (extensionData, infoHash, peerID)
     }
 
-    private func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on connection: AsyncSocket) async throws {
+    private func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on connection: Connection) async throws {
         var data = Data([UInt8(19)])
         data.append("BitTorrent Protocol".data(using: .ascii)!)
 
@@ -271,13 +314,13 @@ public actor TorrentClient {
 
         data.append(peerID.bytes)
 
-        Logger.shared.log("Writing outgoing handshake with infoHash \(infoHash) to \(peerID)", type: .handshakes)
+        Logger.shared.log("Writing outgoing handshake with infoHash \(infoHash) to connection \(connection)", type: .handshakes)
         try await connection.write(data)
     }
 
-    private func postHandshake(for torrent: Torrent, on connection: AsyncSocket) async throws {
+    private func postHandshake(for torrent: Torrent, on connection: Connection) async throws {
         // TODO: implement peer wire protocol
-        let torrentFile = await torrent.torrentFile
+        let torrentFile = torrent.torrentFile
         try await withThrowingTaskGroup { group in
             var peerChoking = false
             var peerInterested = true
@@ -287,8 +330,8 @@ public actor TorrentClient {
             var hasReceivedFirstMessage = false
 
             var localHavesCopy = await torrent.haves
-            Logger.shared.log("Writing initial bitfield \(localHavesCopy.percentComplete, stringFormat: "%.2f")", type: .peerCommunication)
-            async let x = connection.write(localHavesCopy.makeMessage())
+            Logger.shared.log("Writing initial bitfield \(localHavesCopy.percentComplete, stringFormat: "%.2f") to connection \(connection)", type: .peerCommunication)
+            async let x: Void = connection.write(localHavesCopy.makeMessage())
             try await x
             
 
@@ -307,24 +350,24 @@ public actor TorrentClient {
                     case 0:
                         // choke
                         peerChoking = true
-                        Logger.shared.log("Peer is now choking us", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) is now choking us", type: .peerCommunication)
                     case 1:
                         // unchoke
                         peerChoking = false
-                        Logger.shared.log("Peer is no longer choking us", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) is no longer choking us", type: .peerCommunication)
                     case 2:
                         // interested
                         peerInterested = true
-                        Logger.shared.log("Peer is now interested in us", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) is now interested in us", type: .peerCommunication)
                     case 3:
                         // not interested
                         peerInterested = false
-                        Logger.shared.log("Peer is no longer interested in us", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) is no longer interested in us", type: .peerCommunication)
                     case 4:
                         // have
                         let index = UInt32(bigEndian: Data(messageData[1...]).to(type: UInt32.self)!)
                         peerHaves[index] = true
-                        Logger.shared.log("Peer now has piece \(index)", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) now has piece \(index)", type: .peerCommunication)
                         // TODO: perhaps kick off another request
                     case 5:
                         // bitfield
@@ -332,33 +375,34 @@ public actor TorrentClient {
                             // The original BitTorrent spec (BEP0003) just says "'bitfield' is only ever sent as the first message."
                             // It doesn't clarify what clients should do if this is violated, but based on other BEPs I believe that
                             //   clients are supposed to close the connection.
-                            Logger.shared.warn("Recieved bitfield that was not the first message; closing connection", type: .peerCommunication)
+                            Logger.shared.warn("Peer \(connection) send bitfield after already sending messages", type: .peerCommunication)
                             try connection.close()
                             return // TODO: return or something else?
+                            // TODO: don't close connection. yes throw error
                         }
                         let bitfield = Data(messageData[1...])
                         peerHaves = Haves(fromBitfield: bitfield, length: peerHaves.length)
-                        Logger.shared.log("Peer sent bitfield (has \(localHavesCopy.percentComplete, stringFormat: "%.2f")% of the file)", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) sent bitfield (has \(localHavesCopy.percentComplete, stringFormat: "%.2f")% of the file)", type: .peerCommunication)
                     case 6:
                         // request
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
-                        Logger.shared.log("Got request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) requested \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: build request and add to set
                     case 7:
                         // piece
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
-                        Logger.shared.log("Got piece at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) send piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: handle piece
                     case 8:
                         // cancel
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
-                        Logger.shared.log("Got cancellation of previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) canceled previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: build request and remove from set
                     // FAST EXTENSION
                     case 0x0D:
@@ -391,7 +435,7 @@ public actor TorrentClient {
                         // allowed fast
                     // END FAST EXTENSION
                     default:
-                        Logger.shared.warn("Unknown message type", type: .peerCommunication)
+                        Logger.shared.warn("Unknown message type from peer \(connection)", type: .peerCommunication)
                         try connection.close()
                         // unknown message type
                     }
@@ -556,7 +600,7 @@ public actor Torrent {
             let addr: SocketAddress
             do {
                 addr = try .inet(ip4: peerInfo.ip, port: peerInfo.port)
-                Logger.shared.log("Created IPv4 SocketAddress from peer \(peerInfo.peerID)", type: .outgoingConnections)
+                Logger.shared.log("Created IPv4 SocketAddress from peer \(peerInfo.peerID.description)", type: .outgoingConnections)
             } catch {
                 do {
                     addr = try .inet6(ip6: peerInfo.ip, port: peerInfo.port)
