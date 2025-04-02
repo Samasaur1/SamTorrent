@@ -1,4 +1,5 @@
 import Foundation
+import FlyingSocks
 
 // https://stackoverflow.com/a/40089462
 extension Data {
@@ -103,5 +104,21 @@ extension Sequence {
 extension String.StringInterpolation {
     mutating func appendInterpolation(_ value: Double, stringFormat: String) {
         appendLiteral(String(format: stringFormat, value))
+    }
+}
+
+enum SocketAddressError: Swift.Error {
+    case unknownAddress
+}
+extension SocketAddress {
+    func toString() throws -> String {
+        let storage = self.makeStorage()
+        let addr = try Socket.makeAddress(from: storage)
+        switch addr {
+        case let .ip4(ip, port: port), let .ip6(ip, port: port):
+            return "\(ip):\(port)"
+        default:
+            throw SocketAddressError.unknownAddress
+        }
     }
 }
