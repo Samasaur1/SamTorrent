@@ -58,24 +58,24 @@ public actor TorrentClient {
     }
 
     public func launch() async throws {
-        print("preparing pool")
+        Logger.shared.log("preparing pool", type: .setup)
         try await pool.prepare()
-        print("creating socket")
+        Logger.shared.log("creating socket", type: .setup)
         let _socket = try Socket(domain: AF_INET, type: .stream)
-        print("disabling SIGPIPE")
+        Logger.shared.log("disabling SIGPIPE", type: .setup)
         try _socket.setValue(true, for: .noSIGPIPE)
-        print("binding to address")
+        Logger.shared.log("binding to address", type: .setup)
         var bound = false
         for potentialPort in UInt16(54321)...54329 {
             do {
                 try _socket.bind(to: .inet(ip4: BIND_ADDRESS, port: potentialPort))
-                print("Bound to port \(potentialPort)")
+                Logger.shared.log("Bound to port \(potentialPort)", type: .setup)
                 bound = true
                 break
             } catch let error as SocketError {
                 switch error {
                 case let .failed(type, errno, message):
-                    print(type, errno, message)
+                    Logger.shared.log(type, errno, message, type: .setup)
                     if errno == EADDRINUSE {
                         continue
                     }
@@ -86,12 +86,12 @@ public actor TorrentClient {
             }
         }
         if !bound { print("Unable to bind to any port"); exit(2) }
-        print("listening")
+        Logger.shared.log("listening", type: .setup)
         do { try _socket.listen() } catch { print(error, "Unable to listen"); exit(0) }
-        print("creating async socket")
+        Logger.shared.log("creating async socket", type: .setup)
         let serverSocket = try AsyncSocket(socket: _socket, pool: pool)
 
-        print("setup complete")
+        Logger.shared.log("setup complete", type: .setup)
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask {
                 try await self.pool.run()
@@ -115,12 +115,12 @@ public actor TorrentClient {
         let (_, infoHash, peerID) = try! await readIncomingHandshake(on: connection)
 
         guard let torrent = self.torrents[infoHash] else {
-            print("no torrent with info hash")
+            Logger.shared.log("no torrent with info hash", type: .incomingConnections)
             return
         }
 
         guard await torrent.isRunning else {
-            print("torrent is not running")
+            Logger.shared.log("torrent is not running", type: .incomingConnections)
             return
         }
 
@@ -150,25 +150,25 @@ public actor TorrentClient {
 
     private func readIncomingHandshake(on connection: AsyncSocket) async throws -> (ExtensionData, InfoHash, PeerID) {
         let protocolLength = try await Int(connection.read(bytes: 1)[0])
-        print("\(protocolLength) byte protocol name")
+        Logger.shared.log("\(protocolLength) byte protocol name", type: .handshakes)
         let protocolBytes = try await connection.read(bytes: protocolLength)
         guard let protocolName = String(bytes: protocolBytes, encoding: .ascii) else {
             throw TorrentError.nonASCIIProtocol(Data(protocolBytes))
         }
-        print("Protocol: \(protocolName)")
+        Logger.shared.log("Protocol: \(protocolName)", type: .handshakes)
         guard protocolName == "BitTorrent Protocol" else {
             throw TorrentError.unknownProtocol(protocolName)
         }
 
         let extensionDataRaw = try await connection.read(bytes: 8)
-        print("Extension data (raw): \(extensionDataRaw)")
+        Logger.shared.log("Extension data (raw): \(extensionDataRaw)", type: .handshakes)
         let extensionData = ExtensionData(from: extensionDataRaw)
-        print("Extension data: \(extensionData)")
+        Logger.shared.log("Extension data: \(extensionData)", type: .handshakes)
 
         let infoHashRaw = try await connection.read(bytes: 20)
-        print("Info hash (raw): \(infoHashRaw)")
+        Logger.shared.log("Info hash (raw): \(infoHashRaw)", type: .handshakes)
         let infoHash = InfoHash.v1(Data(infoHashRaw))
-        print("Info hash: \(infoHash)")
+        Logger.shared.log("Info hash: \(infoHash)", type: .handshakes)
 
         let peerIDRaw = try await connection.read(bytes: 20)
 
@@ -287,7 +287,7 @@ public actor TorrentClient {
                         // allowed fast
                     // END FAST EXTENSION
                     default:
-                        print("Unknown message type")
+                        Logger.shared.log("Unknown message type", type: .peerCommunication)
                         try connection.close()
                         // unknown message type
                     }
@@ -372,7 +372,7 @@ public actor Torrent {
     }
 
     private func buildTrackerRequest(for event: Event) -> URLRequest {
-        print("Building tracker request for \(event)")
+        Logger.shared.log("Building tracker request for \(event)", type: .trackerRequests)
         // TODO: handle picking the correct tracker
         var components = URLComponents(string: "https://track.er")!
         components.queryItems = [
@@ -390,14 +390,14 @@ public actor Torrent {
         guard let url = components.url else {
             fatalError()
         }
-        print("Built URL \(url)")
+        Logger.shared.log("Built URL \(url)", type: .trackerRequests)
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         return req
     }
 
     private func performTrackerRequest(for event: Event) async throws {
-        print("Performing tracker request for \(event)")
+        Logger.shared.log("Performing tracker request for \(event)", type: .trackerRequests)
         let req = buildTrackerRequest(for: event)
 
         let (data, resp) = try await URLSession.shared.data(for: req)
