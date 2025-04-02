@@ -44,6 +44,31 @@ extension Data {
         _ = Swift.withUnsafeMutableBytes(of: &value) { copyBytes(to: $0) }
         return value
     }
+
+    func percentEncoded() -> String {
+        self.map { byte in
+            switch byte {
+            case 126:
+                return "~"
+            case 46:
+                return "."
+            case 95:
+                return "_"
+            case 45:
+                return "-"
+            case let x where x >= 48 && x <= 57: // [0-9]
+                //return Character(UnicodeScalar(x))
+                return "\(x-48)"
+            case let x where x >= 65 && x <= 90: //[A-Z]
+                return String(Character(UnicodeScalar(x)))
+            case let x where x >= 97 && x <= 122: //[a-z]
+                return String(Character(UnicodeScalar(x)))
+            default:
+                return String(format: "%%%02x", byte)
+                //equivalent to String(byte, radix: 16, uppercase: true) but with padding
+            }
+        }.joined(separator: "")
+    }
 }
 
 // https://www.swiftbysundell.com/articles/async-and-concurrent-forEach-and-map/

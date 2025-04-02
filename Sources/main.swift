@@ -38,6 +38,10 @@ public enum InfoHash: Hashable, Sendable, CustomStringConvertible {
             return data
         }
     }
+
+    func percentEncoded() -> String {
+        bytes.percentEncoded()
+    }
 }
 
 
@@ -57,11 +61,16 @@ struct PeerID: CustomStringConvertible {
         }
         return String(chars)
     }
+
+    func percentEncoded() -> String {
+        bytes.percentEncoded()
+    }
 }
 
 public actor TorrentClient {
     let peerID: PeerID
     var torrents: [InfoHash: Torrent]
+    var port: UInt16 = 0
 
     private let pool: some AsyncSocketPool = .make()
 
@@ -84,6 +93,7 @@ public actor TorrentClient {
                 try _socket.bind(to: .inet(ip4: BIND_ADDRESS, port: potentialPort))
                 Logger.shared.log("Bound to port \(potentialPort)", type: .setup)
                 bound = true
+                port = potentialPort
                 break
             } catch let error as SocketError {
                 switch error {
@@ -140,7 +150,7 @@ public actor TorrentClient {
         let infoDictEncoded = try BencodeEncoder().encode(tf.info)
         let ih = Data(Insecure.SHA1.hash(data: infoDictEncoded))
         let infoHash = InfoHash.v1(ih)
-        self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf)
+        self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf, peerID: self.peerID, port: self.port)
     }
 
     private func accept(connection: AsyncSocket) async {
@@ -428,10 +438,15 @@ public actor Torrent {
     }
     public let infoHash: InfoHash
     let torrentFile: TorrentFileV1
+    let peerID: PeerID
+    let port: UInt16
 
-    init(infoHash: InfoHash, torrentFile: TorrentFileV1) {
+    // TODO: better way to pass the peer ID around?
+    init(infoHash: InfoHash, torrentFile: TorrentFileV1, peerID: PeerID, port: UInt16) {
         self.infoHash = infoHash
         self.torrentFile = torrentFile
+        self.peerID = peerID
+        self.port = port
         self.haves = Haves.empty(ofLength: torrentFile.pieceCount)
     }
 
@@ -450,9 +465,7 @@ public actor Torrent {
             throw TorrentError.invalidAnnounceURL(self.torrentFile.announce)
         }
         components.queryItems = [
-            URLQueryItem(name: "info_hash", value: self.infoHash.description),
-            URLQueryItem(name: "peer_id", value: ""),
-            URLQueryItem(name: "port", value: ""),
+            URLQueryItem(name: "port", value: String(self.port)),
             URLQueryItem(name: "uploaded", value: String(self.uploaded)),
             URLQueryItem(name: "downloaded", value: String(self.downloaded)),
             URLQueryItem(name: "left", value: String(self.left)),
@@ -462,6 +475,10 @@ public actor Torrent {
             // TODO: more logging?
             components.queryItems?.append(URLQueryItem(name: "trackerid", value: trackerID))
         }
+        components.percentEncodedQueryItems?.append(contentsOf: [
+            URLQueryItem(name: "info_hash", value: self.infoHash.percentEncoded()),
+            URLQueryItem(name: "peer_id", value: self.peerID.percentEncoded()),
+        ])
         guard let url = components.url else {
             Logger.shared.error("Cannot build URL from components", type: .trackerRequests)
             fatalError()
