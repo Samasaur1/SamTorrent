@@ -22,7 +22,12 @@ struct TorrentFileV1: Codable {
             case pieces
             case length
             case files
+            case md5sum, sha1, sha256
         }
+
+        let md5sum: Data?
+        let sha1: Data?
+        let sha256: Data?
     }
 
     let announce: String
