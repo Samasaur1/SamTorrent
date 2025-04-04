@@ -498,6 +498,7 @@ public actor TorrentClient {
             }
             group.addTask {
                 while await torrent.isRunning {
+                    try await Task.sleep(for: .seconds(1))
                 }
             }
             try await group.next()
