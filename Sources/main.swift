@@ -654,24 +654,28 @@ public actor Torrent {
         }
 
         Logger.shared.log("Tracker response: \(obj.complete) complete, \(obj.incomplete) incomplete, \(obj.peers.count) peers (first peer \(obj.peers.first?.ip):\(obj.peers.first?.port))", type: .trackerRequests)
-        obj.peers.prefix(upTo: 5).map { peerInfo in
-            let peerID = PeerID(bytes: peerInfo.peerID)
 
-            let addr: SocketAddress
-            do {
-                addr = try .inet(ip4: peerInfo.ip, port: peerInfo.port)
-                Logger.shared.log("Created IPv4 SocketAddress for peer \(peerID)", type: .outgoingConnections)
-            } catch {
+        // This should maybe be made a little nicer
+        if event != .stop {
+            obj.peers.prefix(upTo: 5).map { peerInfo in
+                let peerID = PeerID(bytes: peerInfo.peerID)
+
+                let addr: SocketAddress
                 do {
-                    addr = try .inet6(ip6: peerInfo.ip, port: peerInfo.port)
-                    Logger.shared.log("Created IPv6 SocketAddress for peer \(peerID)", type: .outgoingConnections)
+                    addr = try .inet(ip4: peerInfo.ip, port: peerInfo.port)
+                    Logger.shared.log("Created IPv4 SocketAddress for peer \(peerID)", type: .outgoingConnections)
                 } catch {
-                    Logger.shared.warn("Unable to create SocketAddress for peer \(peerID)", type: .outgoingConnections)
-                    return
+                    do {
+                        addr = try .inet6(ip6: peerInfo.ip, port: peerInfo.port)
+                        Logger.shared.log("Created IPv6 SocketAddress for peer \(peerID)", type: .outgoingConnections)
+                    } catch {
+                        Logger.shared.warn("Unable to create SocketAddress for peer \(peerID)", type: .outgoingConnections)
+                        return
+                    }
                 }
-            }
-            Task {
-                await client.makeConnection(to: peerID, at: addr, for: self)
+                Task {
+                    await client.makeConnection(to: peerID, at: addr, for: self)
+                }
             }
         }
 
