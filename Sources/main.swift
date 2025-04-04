@@ -304,8 +304,8 @@ public actor TorrentClient {
             throw TorrentError.nonASCIIProtocol(Data(protocolBytes))
         }
         Logger.shared.log("Connection \(connection) wants to use protocol: \(protocolName)", type: .handshakes)
-        guard protocolName == "BitTorrent Protocol" else {
-            Logger.shared.error("Connection \(connection)'s desired P2P protocol is '\(protocolName)', not 'BitTorrent Protocol'", type: .handshakes)
+        guard protocolName == "BitTorrent protocol" else {
+            Logger.shared.error("Connection \(connection)'s desired P2P protocol is '\(protocolName)', not 'BitTorrent protocol'", type: .handshakes)
             throw TorrentError.unknownProtocol(protocolName)
         }
 
@@ -329,7 +329,7 @@ public actor TorrentClient {
 
     private func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on connection: Connection) async throws {
         var data = Data([UInt8(19)])
-        data.append("BitTorrent Protocol".data(using: .ascii)!)
+        data.append("BitTorrent protocol".data(using: .ascii)!)
 
         data.append(ExtensionData.supportedByMe.bytes)
 
