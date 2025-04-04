@@ -12,15 +12,19 @@ struct ExtensionData: OptionSet {
 
     static let supportedByMe: ExtensionData = []
 }
-extension ExtensionData {
+extension ExtensionData: CustomStringConvertible {
     init(from bytes: Data) {
         rawValue = bytes.to(type: UInt64.self)!
-        // TODO: fix this
+        // TODO: test this
     }
 
     var bytes: Data {
-        Data(repeating: 0, count: 8)
-        // TODO: fix this too
+        Data(from: self.rawValue)
+        // TODO: test this
+    }
+
+    var description: String {
+        "ExtensionData(dht: \(self.contains(.dht)), fast: \(self.contains(.fast)), extension: \(self.contains(.extension)))"
     }
 }
 
@@ -111,6 +115,7 @@ public actor TorrentClient {
     init() {
         self.peerID = PeerID.random()
         self.torrents = [:]
+        Logger.shared.log("We support \(ExtensionData.supportedByMe)", type: .setup)
     }
 
     public func launch() async throws {
