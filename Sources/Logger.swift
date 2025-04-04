@@ -41,17 +41,20 @@ public struct Logger: Sendable {
 
     func error(_ msg: String, type: LogType) {
         if allowedLogTypes.contains(type) {
-            print("[\(type.logPrefix)]:".bold.red, msg)
+            // print("[\(type.logPrefix)]:".bold.red, msg)
+            print("[\(Date()) \(type.logPrefix.bold.red)]: \(msg)")
         }
     }
     func warn(_ msg: String, type: LogType) {
         if allowedLogTypes.contains(type) {
-            print("[\(type.logPrefix)]:".bold.yellow, msg)
+            // print("[\(type.logPrefix)]:".bold.yellow, msg)
+            print("[\(Date()) \(type.logPrefix.bold.yellow)]: \(msg)")
         }
     }
     func log(_ msg: String, type: LogType) {
         if allowedLogTypes.contains(type) {
-            print("[\(type.logPrefix)]:".bold, msg)
+            // print("[\(type.logPrefix)]:".bold, msg)
+            print("[\(Date()) \(type.logPrefix.bold)]: \(msg)")
         }
     }
 }
