@@ -312,17 +312,17 @@ public actor TorrentClient {
         }
 
         let extensionDataRaw = try await connection.read(bytes: 8)
-        Logger.shared.log("Connection \(connection) has raw extension data: \(extensionDataRaw)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has raw extension data: \(extensionDataRaw.hexEncodedString())", type: .handshakes)
         let extensionData = ExtensionData(from: extensionDataRaw)
         Logger.shared.log("Connection \(connection) has extension data: \(extensionData)", type: .handshakes)
 
         let infoHashRaw = try await connection.read(bytes: 20)
-        Logger.shared.log("Connection \(connection) has raw info hash: \(infoHashRaw)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has raw info hash: \(infoHashRaw.hexEncodedString())", type: .handshakes)
         let infoHash = InfoHash.v1(Data(infoHashRaw))
         Logger.shared.log("Connection \(connection) has info hash: \(infoHash)", type: .handshakes)
 
         let peerIDRaw = try await connection.read(bytes: 20)
-        Logger.shared.log("Connection \(connection) has raw peer ID: \(peerIDRaw)", type: .handshakes)
+        Logger.shared.log("Connection \(connection) has raw peer ID: \(peerIDRaw.hexEncodedString())", type: .handshakes)
         let peerID = PeerID(bytes: Data(peerIDRaw))
         Logger.shared.log("Connection \(connection) has peer ID: \(peerID)", type: .handshakes)
 
