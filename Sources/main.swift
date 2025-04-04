@@ -6,7 +6,9 @@ import Crypto
 struct ExtensionData: OptionSet {
     let rawValue: UInt64
 
-    // static let fast: ExtensionData = ExtensionData(rawValue: 1 << 0)
+    static let dht: ExtensionData = ExtensionData(rawValue: 1 << 0) // BEP0005
+    static let fast: ExtensionData = ExtensionData(rawValue: 1 << 2) // BEP0006
+    static let `extension`: ExtensionData = ExtensionData(rawValue: 1 << 20) //BEP0010
 
     static let supportedByMe: ExtensionData = []
 }
@@ -345,11 +347,16 @@ public actor TorrentClient {
         // TODO: implement peer wire protocol
         let torrentFile = torrent.torrentFile
         try await withThrowingTaskGroup { group in
-            var peerChoking = false
-            var peerInterested = true
+            // All connections start like this
+            var peerChoking = true
+            var peerInterested = false
+            var usChoking = true
+            var usInterested = false
 
+            // Assume empty; overwrite if we get a bitfield message
             var peerHaves: Haves = Haves.empty(ofLength: torrentFile.pieceCount)
 
+            // This lets us detect the error where a peer sends a bitfield as not the first message
             var hasReceivedFirstMessage = false
 
             var localHavesCopy = await torrent.haves
@@ -366,7 +373,6 @@ public actor TorrentClient {
                         // This message is a keep-alive; ignore it
                         continue
                     }
-                    Logger.shared.log("Peer \(connection) sent a message of length \(messageLength)", type: .peerCommunication)
                     let messageData = try await connection.read(bytes: Int(messageLength))
                     defer { hasReceivedFirstMessage = true }
 
@@ -428,36 +434,56 @@ public actor TorrentClient {
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
                         Logger.shared.log("Peer \(connection) canceled previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: build request and remove from set
-                    // FAST EXTENSION
+                    // BEP0005 (DHT PROTOCOL)
+                    case 9:
+                        // port
+                        guard ExtensionData.supportedByMe.contains(.dht) else {
+                            Logger.shared.warn("Got P2P message that requires the DHT protocol (BEP 5), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
+                    // END BEP0005 (DHT PROTOCOL)
+                    // BEP0006 FAST EXTENSION
                     case 0x0D:
-                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
-                        try connection.close() // We do not support the fast extension at the moment
                         // suggest piece
+                        guard ExtensionData.supportedByMe.contains(.fast) else {
+                            Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 6)
+                        }
                     case 0x0E:
-                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
-                        try connection.close() // We do not support the fast extension at the moment
                         // have all
+                        guard ExtensionData.supportedByMe.contains(.fast) else {
+                            Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 6)
+                        }
+
                         if hasReceivedFirstMessage {
                             try connection.close()
                         }
                         peerHaves = Haves.full(ofLength: peerHaves.length)
                     case 0x0F:
-                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
-                        try connection.close() // We do not support the fast extension at the moment
                         // have none
+                        guard ExtensionData.supportedByMe.contains(.fast) else {
+                            Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 6)
+                        }
+
                         if hasReceivedFirstMessage {
                             try connection.close()
                         }
                         peerHaves = Haves.empty(ofLength: peerHaves.length)
                     case 0x10:
-                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
-                        try connection.close() // We do not support the fast extension at the moment
                         // reject request
+                        guard ExtensionData.supportedByMe.contains(.fast) else {
+                            Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 6)
+                        }
                     case 0x11:
-                        Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
-                        try connection.close() // We do not support the fast extension at the moment
                         // allowed fast
-                    // END FAST EXTENSION
+                        guard ExtensionData.supportedByMe.contains(.fast) else {
+                            Logger.shared.warn("Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 6)
+                        }
+                    // END BEP0006 FAST EXTENSION
                     default:
                         Logger.shared.warn("Unknown message type from peer \(connection)", type: .peerCommunication)
                         try connection.close()
@@ -685,6 +711,7 @@ enum TorrentError: Error {
     case wrongInfoHash(InfoHash)
     case invalidAnnounceURL(String)
     case pausedTorrent(InfoHash)
+    case unsupportedExtension(BEP: Int?)
 }
 
 let client = TorrentClient()
