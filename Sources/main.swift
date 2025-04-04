@@ -798,7 +798,7 @@ let ioTask = Task {
                     }
                 }
             case "connectto":
-                await client.makeConnection(to: PeerID.random(), at: try! .inet(ip4: "127.0.0.1", port: 12345), for: client.torrents.first!.value)
+                await client.makeConnection(to: PeerID.random(), at: try! .inet(ip4: "127.0.0.1", port: 6881), for: client.torrents.first!.value)
             default:
                 print("unknown command")
                 continue
