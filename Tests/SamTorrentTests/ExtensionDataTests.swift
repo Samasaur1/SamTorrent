@@ -12,8 +12,14 @@ struct ExtensionDataTests {
         #expect(ext.bytes == data)
     }
 
+    @Test func emptyOptionSetProducesZeroBytes() {
+        let ext: ExtensionData = []
+
+        #expect(ext.bytes == Data([0,0,0,0,0,0,0,0]))
+    }
+
     @Test func extensionProtocolBitIsCorrect() {
-        let data = Data([0, 0, 0, 0, 0x10, 0, 0, 0])
+        let data = Data([0, 0, 0, 0, 0, 0x10, 0, 0])
 
         #expect(ExtensionData.extension.bytes == data)
 
@@ -40,5 +46,17 @@ struct ExtensionDataTests {
         let ext = ExtensionData(from: data)
 
         #expect(ext == .dht)
+    }
+
+    @Test func compositionOfFastAndDHT() {
+        let data = Data([0, 0, 0, 0, 0, 0, 0, 0x05])
+
+        let correct: ExtensionData = [.dht, .fast]
+
+        #expect(correct.bytes == data)
+
+        let ext = ExtensionData(from: data)
+
+        #expect(ext == correct)
     }
 }
