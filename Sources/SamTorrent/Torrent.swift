@@ -114,7 +114,7 @@ public actor Torrent {
 
         // This should maybe be made a little nicer
         if event != .stop {
-            obj.peers.prefix(upTo: 5).map { peerInfo in
+            obj.peers.shuffled().prefix(upTo: 5).map { peerInfo in
                 let peerID = PeerID(bytes: peerInfo.peerID)
 
                 let addr: SocketAddress
