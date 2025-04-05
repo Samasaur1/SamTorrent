@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "testbed",
+    name: "SamTorrent",
     platforms: [
         .macOS(.v14)
     ],
@@ -20,11 +20,18 @@ let package = Package(
         .executableTarget(
             name: "testbed",
             dependencies: [
+                "SamTorrent",
+            ]
+        ),
+        .target(
+            name: "SamTorrent",
+            dependencies: [
                 .product(name: "FlyingSocks", package: "FlyingFox"),
                 .product(name: "BencodeKit", package: "BencodeKit"),
                 .product(name: "Rainbow", package: "Rainbow"),
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
+        .testTarget(name: "SamTorrentTests"),
     ]
 )

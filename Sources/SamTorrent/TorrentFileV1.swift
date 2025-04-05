@@ -2,7 +2,7 @@ import BencodeKit
 import Foundation
 
 // See: https://www.bittorrent.org/beps/bep_0003.html
-struct TorrentFileV1: Codable {
+public struct TorrentFileV1: Codable, Sendable {
     struct InfoDictionary: Codable {
         struct MultipleFileInfo: Codable {
             let length: Int
