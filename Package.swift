@@ -32,6 +32,11 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
-        .testTarget(name: "SamTorrentTests"),
+        .testTarget(
+            name: "SamTorrentTests",
+            dependencies: [
+                "SamTorrent"
+            ],
+        ),
     ]
 )

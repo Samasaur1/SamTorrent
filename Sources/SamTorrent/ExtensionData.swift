@@ -3,9 +3,10 @@ import Foundation
 struct ExtensionData: OptionSet {
     let rawValue: UInt64
 
-    static let dht: ExtensionData = ExtensionData(rawValue: 1 << 0) // BEP0005
-    static let fast: ExtensionData = ExtensionData(rawValue: 1 << 2) // BEP0006
-    static let `extension`: ExtensionData = ExtensionData(rawValue: 1 << 20) //BEP0010
+    // static let dht: ExtensionData = ExtensionData(rawValue: 1 << 0) // BEP0005
+    static let dht: ExtensionData = ExtensionData(from: Data([0,0,0,0,0,0,0,0x01])) // BEP0005
+    static let fast: ExtensionData = ExtensionData(from: Data([0,0,0,0,0,0,0,0x04])) // BEP0006
+    static let `extension`: ExtensionData = ExtensionData(from: Data([0,0,0,0,0x10,0,0,0])) //BEP0010
 
     static let supportedByMe: ExtensionData = []
 }
