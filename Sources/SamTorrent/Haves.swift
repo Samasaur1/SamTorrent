@@ -1,7 +1,7 @@
 import Foundation
 
 // From Gauck (2022). Used with permission.
-struct /*The*/ Haves /*And The Have-Nots*/ {
+struct /*The*/ Haves /*And The Have-Nots*/ : Equatable {
     internal private(set) var arr: [Bool] = []
     let length: Int
     //This MUST NOT be a slice, but slices can be usable if wrapped in Data
@@ -18,7 +18,7 @@ struct /*The*/ Haves /*And The Have-Nots*/ {
         return Haves(fromBitfield: Data(repeating: 0, count: (length/8)+1), length: length)
     }
     static func full(ofLength length: Int) -> Haves {
-        return Haves(fromBitfield: Data(repeating: 1, count: (length/8)+1), length: length)
+        return Haves(fromBitfield: Data(repeating: .max, count: (length/8)+1), length: length)
     }
     subscript(index: Int) -> Bool {
         get {
@@ -54,7 +54,7 @@ struct /*The*/ Haves /*And The Have-Nots*/ {
             currentByte |= 1 << bitInByte
             bitInByte -= 1
         }
-        if bitInByte > -1 {
+        if bitInByte >= -1 {
             data.append(currentByte)
         }
         return data
