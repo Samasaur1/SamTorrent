@@ -121,4 +121,8 @@ extension SocketAddress {
             throw SocketAddressError.unknownAddress
         }
     }
+
+    var description: String {
+        (try? self.toString()) ?? String(describing: self)
+    }
 }
