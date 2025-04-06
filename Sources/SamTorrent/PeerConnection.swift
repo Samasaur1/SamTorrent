@@ -1,7 +1,7 @@
 import Foundation
 import FlyingSocks
 
-public struct Connection: Sendable, CustomStringConvertible {
+public struct PeerConnection: Sendable, CustomStringConvertible {
     let uuid: UUID
     var peerID: PeerID! = nil
 

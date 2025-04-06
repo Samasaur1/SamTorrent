@@ -76,7 +76,7 @@ public actor TorrentClient {
             group.addTask {
                 try await withThrowingDiscardingTaskGroup { group in
                     for try await _conn in serverSocket.sockets {
-                        var conn = Connection(wrapping: _conn)
+                        var conn = PeerConnection(wrapping: _conn)
                         Logger.shared.log("Got incoming connection \(conn)", type: .incomingConnections)
                         group.addTask {
                             defer { try? conn.close() }
@@ -105,7 +105,7 @@ public actor TorrentClient {
         self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf, client: self, peerID: self.peerID, port: self.port)
     }
 
-    private func accept(connection: inout Connection) async throws {
+    private func accept(connection: inout PeerConnection) async throws {
         // TODO: possibly need to start our part of the handshake immediately after reading the info hash
         let infoHash: InfoHash
         do {
@@ -153,10 +153,10 @@ public actor TorrentClient {
         Task {
             do {
                 Logger.shared.log("Attempting to connect to \(addrString) (will be connection \(uuid.uuidString))", type: .outgoingConnections)
-                var connection: Connection
+                var connection: PeerConnection
                 do {
                     let socket = try await AsyncSocket.connected(to: address, pool: self.pool)
-                    connection = Connection(wrapping: socket, with: uuid)
+                    connection = PeerConnection(wrapping: socket, with: uuid)
                     Logger.shared.log("Connected to \(addrString) on connection \(connection)", type: .outgoingConnections)
                 } catch {
                     Logger.shared.warn("Unable to connect to \(addrString) (error: \(error))", type: .outgoingConnections)
@@ -202,7 +202,7 @@ public actor TorrentClient {
         }
     }
 
-    private func readIncomingHandshake(on connection: Connection) async throws -> (ExtensionData, InfoHash, PeerID) {
+    private func readIncomingHandshake(on connection: PeerConnection) async throws -> (ExtensionData, InfoHash, PeerID) {
         let protocolLength: Int
         do {
             protocolLength = try await Int(connection.read(bytes: 1)[0])
@@ -240,7 +240,7 @@ public actor TorrentClient {
         return (extensionData, infoHash, peerID)
     }
 
-    private func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on connection: Connection) async throws {
+    private func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on connection: PeerConnection) async throws {
         var data = Data([UInt8(19)])
         data.append("BitTorrent protocol".data(using: .ascii)!)
 
@@ -254,7 +254,7 @@ public actor TorrentClient {
         try await connection.write(data)
     }
 
-    private func postHandshake(for torrent: Torrent, on connection: Connection) async throws {
+    private func postHandshake(for torrent: Torrent, on connection: PeerConnection) async throws {
         // TODO: implement peer wire protocol
         let torrentFile = await torrent.torrentFile
         try await withThrowingTaskGroup { group in
