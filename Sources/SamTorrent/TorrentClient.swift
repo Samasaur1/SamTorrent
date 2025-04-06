@@ -5,6 +5,12 @@ import Crypto
 
 let BIND_ADDRESS = "0.0.0.0"
 
+struct PieceRequest {
+    let index: UInt32
+    let offset: UInt32
+    let length: UInt32
+}
+
 public actor TorrentClient {
     let peerID: PeerID
     public private(set) var torrents: [InfoHash: Torrent]
@@ -311,9 +317,7 @@ public actor TorrentClient {
                             // It doesn't clarify what clients should do if this is violated, but based on other BEPs I believe that
                             //   clients are supposed to close the connection.
                             Logger.shared.warn("Peer \(connection) send bitfield after already sending messages", type: .peerCommunication)
-                            try connection.close()
-                            return // TODO: return or something else?
-                            // TODO: don't close connection. yes throw error
+                            throw TorrentError.bitfieldAfterStart
                         }
                         let bitfield = Data(messageData[1...])
                         peerHaves = Haves(fromBitfield: bitfield, length: peerHaves.length)
@@ -324,13 +328,14 @@ public actor TorrentClient {
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
                         Logger.shared.log("Peer \(connection) requested \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        let req = PieceRequest(index: index, offset: begin, length: length)
                         // TODO: build request and add to set
                     case 7:
                         // piece
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
-                        Logger.shared.log("Peer \(connection) send piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        Logger.shared.log("Peer \(connection) sent piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
                         // TODO: handle piece
                     case 8:
                         // cancel
@@ -338,6 +343,7 @@ public actor TorrentClient {
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
                         Logger.shared.log("Peer \(connection) canceled previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        let req = PieceRequest(index: index, offset: begin, length: length)
                         // TODO: build request and remove from set
                     // BEP0005 (DHT PROTOCOL)
                     case 9:
@@ -362,7 +368,8 @@ public actor TorrentClient {
                         }
 
                         if hasReceivedFirstMessage {
-                            try connection.close()
+                            Logger.shared.warn("Peer \(connection) sent haveAll after already sending messages", type: .peerCommunication)
+                            throw TorrentError.bitfieldAfterStart
                         }
                         peerHaves = Haves.full(ofLength: peerHaves.length)
                     case 0x0F:
@@ -373,7 +380,8 @@ public actor TorrentClient {
                         }
 
                         if hasReceivedFirstMessage {
-                            try connection.close()
+                            Logger.shared.warn("Peer \(connection) sent haveNone after already sending messages", type: .peerCommunication)
+                            throw TorrentError.bitfieldAfterStart
                         }
                         peerHaves = Haves.empty(ofLength: peerHaves.length)
                     case 0x10:

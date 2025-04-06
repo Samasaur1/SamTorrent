@@ -7,4 +7,5 @@ enum TorrentError: Error {
     case invalidAnnounceURL(String)
     case pausedTorrent(InfoHash)
     case unsupportedExtension(BEP: Int?)
+    case bitfieldAfterStart
 }
