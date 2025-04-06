@@ -12,7 +12,7 @@ struct PieceRequest {
 }
 
 public actor TorrentClient {
-    let peerID: PeerID
+    public let peerID: PeerID
     public private(set) var torrents: [InfoHash: Torrent]
     private(set) var port: UInt16 = 0
 
