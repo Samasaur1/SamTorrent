@@ -24,6 +24,8 @@ public actor Torrent {
     let port: UInt16
     let client: TorrentClient
 
+    var connections: [PeerConnection] = []
+
     // TODO: better way to pass the peer ID around?
     init(infoHash: InfoHash, torrentFile: TorrentFileV1, client: TorrentClient, peerID: PeerID, port: UInt16) {
         self.infoHash = infoHash
@@ -131,7 +133,7 @@ public actor Torrent {
                     }
                 }
                 Task {
-                    await self.client.makeConnection(to: peerID, at: addr, for: self)
+                    try await self.client.makeConnection(to: peerID, at: addr, for: self)
                 }
             }
         }

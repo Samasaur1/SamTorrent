@@ -8,4 +8,5 @@ enum TorrentError: Error {
     case pausedTorrent(InfoHash)
     case unsupportedExtension(BEP: Int?)
     case bitfieldAfterStart
+    case unknownP2PMessage
 }
