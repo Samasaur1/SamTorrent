@@ -5,12 +5,6 @@ import Crypto
 
 let BIND_ADDRESS = "0.0.0.0"
 
-struct PieceRequest {
-    let index: UInt32
-    let offset: UInt32
-    let length: UInt32
-}
-
 public actor TorrentClient {
     public let peerID: PeerID
     public private(set) var torrents: [InfoHash: Torrent]
