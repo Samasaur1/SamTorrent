@@ -8,6 +8,9 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
+    products: [
+        .executable(name: "SamTorrent", targets: ["BasicClient"])
+    ],
     dependencies: [
         .package(url: "https://github.com/swhitty/FlyingFox", from: "0.21.0"),
         .package(url: "https://github.com/Samasaur1/BencodeKit", branch: "main"),
@@ -18,7 +21,7 @@ let package = Package(
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(
-            name: "testbed",
+            name: "BasicClient",
             dependencies: [
                 "SamTorrent",
             ]
