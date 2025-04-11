@@ -53,20 +53,14 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         }
 
         do {
-            try await Self.writeOutgoingHandshake(for: infoHash, with: client.peerID, on: socket)
+            try await Self.writeOutgoingHandshake(for: infoHash, with: client.peerID, on: socket, uuid: uuid)
             Logger.shared.log("[\(uuid.uuidString)] Wrote outgoing handshake", type: .incomingConnections)
         } catch {
             Logger.shared.warn("[\(uuid.uuidString)] Unable to write outgoing handshake (error: \(error))", type: .incomingConnections)
             throw error
         }
 
-        // do {
-        //     try await self.postHandshake(for: torrent, on: connection)
-        // } catch {
-        //     Logger.shared.warn("P2P communication with \(connection) exited with an error", type: .incomingConnections)
-        //     throw error
-        // }
-
+        Logger.shared.log("[\(uuid.uuidString)] Handshakes completed", type: .incomingConnections)
         return PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
     }
 
@@ -89,13 +83,12 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                 Logger.shared.warn("[\(uuid.uuidString)] Unable to connect to \(addrString) (error: \(error))", type: .outgoingConnections)
                 throw error
             }
-            defer { try? socket.close() } // do i still want this?
 
             let infoHash = torrent.infoHash
             let ourPeerID = client.peerID
 
             do {
-                try await Self.writeOutgoingHandshake(for: infoHash, with: ourPeerID, on: socket)
+                try await Self.writeOutgoingHandshake(for: infoHash, with: ourPeerID, on: socket, uuid: uuid)
                 Logger.shared.log("[\(uuid.uuidString)] Wrote outgoing handshake", type: .outgoingConnections)
             } catch {
                 Logger.shared.warn("[\(uuid.uuidString)] Unable to write outgoing handshake (error: \(error))", type: .outgoingConnections)
@@ -119,21 +112,11 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             }
 
             Logger.shared.log("[\(uuid.uuidString)] Handshakes completed", type: .outgoingConnections)
-
-            // do {
-            //     try await self.postHandshake(for: torrent, on: connection)
-            // } catch {
-            //     Logger.shared.warn("P2P communication with \(connection) exited with an error", type: .outgoingConnections)
-            //     throw error
-            // }
-
             return PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
         } catch {
             Logger.shared.warn("Connection \(uuid.uuidString) closed with error: \(error)", type: .outgoingConnections)
             throw error
         }
-
-        // Logger.shared.log("Connection \(uuid.uuidString) closed gracefully", type: .outgoingConnections)
     }
 
     private static func readIncomingHandshake(on socket: AsyncSocketWrapper, uuid: UUID) async throws -> (ExtensionData, InfoHash, PeerID) {
@@ -174,9 +157,9 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         return (extensionData, infoHash, peerID)
     }
 
-    private static func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on socket: AsyncSocketWrapper) async throws {
+    private static func writeOutgoingHandshake(for infoHash: InfoHash, with peerID: PeerID, on socket: AsyncSocketWrapper, uuid: UUID) async throws {
         var data = Data([UInt8(19)])
-        data.append("BitTorrent protocol".data(using: .ascii)!)
+        data.append(Self.BITTORRENT_PROTOCOL_NAME.data(using: .ascii)!)
 
         data.append(ExtensionData.supportedByMe.bytes)
 
@@ -184,7 +167,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
 
         data.append(peerID.bytes)
 
-        Logger.shared.log("[\(self)] Writing outgoing handshake with infoHash \(infoHash)", type: .handshakes)
+        Logger.shared.log("[\(uuid.uuidString)] Writing outgoing handshake with infoHash \(infoHash)", type: .handshakes)
         try await socket.write(data)
     }
 
