@@ -35,7 +35,7 @@ struct PieceData {
     }
     let idx: UInt32
     private let size: UInt32
-    private let infoHash: Data //TODO: this is NOT an infoHash
+    private let pieceHash: Data
     private var writtenSegments: [WrittenSegment] = []
     var totalData: UInt32 {
         writtenSegments.map(\.length).reduce(0, +)
@@ -44,7 +44,7 @@ struct PieceData {
     init(idx: UInt32, size: UInt32, infoHash: Data) {
         self.idx = idx
         self.size = size
-        self.infoHash = infoHash
+        self.pieceHash = infoHash
     }
 
     mutating func receive(_ data: Data, for request: PieceRequest) {
@@ -210,7 +210,7 @@ struct PieceData {
         }
         let hash = Data(Insecure.SHA1.hash(data: writtenSegments[0].data))
         // logger.log("Piece \(idx) is\(hash == infoHash ? "" : " not") verified", type: .verifyingPieces)
-        if hash == infoHash {
+        if hash == pieceHash {
             return writtenSegments[0].data
         }
         return nil
