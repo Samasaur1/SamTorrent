@@ -1,7 +1,7 @@
 import Foundation
 import Crypto
 
-protocol FileIO {
+protocol FileIO: Actor {
     init(baseDirectory: URL, for torrentFile: TorrentFile) throws
 
     func read(ofLength length: Int, fromPiece pieceIndex: UInt64, beginningAt byteOffset: UInt64) async throws -> Data

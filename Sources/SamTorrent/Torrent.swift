@@ -19,22 +19,25 @@ public actor Torrent {
         }
     }
     public let infoHash: InfoHash
-    let torrentFile: TorrentFileV1
+    let torrentFile: TorrentFile
     let peerID: PeerID
     let port: UInt16
     let client: TorrentClient
 
     var connections: [PeerConnection] = []
+    var fileIO: FileIO
 
     // TODO: better way to pass the peer ID around?
-    init(infoHash: InfoHash, torrentFile: TorrentFileV1, client: TorrentClient, peerID: PeerID, port: UInt16) {
+    init(infoHash: InfoHash, torrentFile: TorrentFileV1, client: TorrentClient, peerID: PeerID, port: UInt16) async throws {
         self.infoHash = infoHash
-        self.torrentFile = torrentFile
+        self.torrentFile = TorrentFile(from: torrentFile)
         self.client = client
         // These could be gotten directly from the client, but it's a pain at least for the port because of concurrency
         self.peerID = peerID
         self.port = port
-        self.haves = Haves.empty(ofLength: torrentFile.pieceCount)
+        // This can produce MultiFileIO; you just can't call a static method on the protocol type itself
+        self.fileIO = try SingleFileIO.make(baseDirectory: URL.currentDirectory(), for: torrentFile)
+        self.haves = try await self.fileIO.computeHaves(withHashes: self.torrentFile.pieces)
     }
 
     private enum Event: String {

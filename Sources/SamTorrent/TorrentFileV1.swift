@@ -53,6 +53,7 @@ public struct TorrentFile: Sendable {
     let pieceCount: Int
     let pieceLength: Int
     let name: String
+    let announce: String
 
     let files: [File]
 
@@ -65,6 +66,7 @@ public struct TorrentFile: Sendable {
         self.pieceCount = self.pieces.count
         self.pieceLength = torrentFile.info.pieceLength
         self.name = torrentFile.info.name
+        self.announce = torrentFile.announce
 
         if let l = torrentFile.info.length {
             self.files = [File(length: l, pathFromRoot: [])]

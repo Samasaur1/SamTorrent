@@ -98,10 +98,10 @@ public actor TorrentClient {
 
     // TODO: make public
     // TODO: this should probably take a file and not a TorrentFile object
-    public func addTorrent(from tf: TorrentFileV1) throws {
+    public func addTorrent(from tf: TorrentFileV1) async throws {
         let infoDictEncoded = try BencodeEncoder().encode(tf.info)
         let ih = Data(Insecure.SHA1.hash(data: infoDictEncoded))
         let infoHash = InfoHash.v1(ih)
-        self.torrents[infoHash] = Torrent(infoHash: infoHash, torrentFile: tf, client: self, peerID: self.peerID, port: self.port)
+        self.torrents[infoHash] = try await Torrent(infoHash: infoHash, torrentFile: tf, client: self, peerID: self.peerID, port: self.port)
     }
 }
