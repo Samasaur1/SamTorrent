@@ -61,7 +61,9 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         }
 
         Logger.shared.log("[\(uuid.uuidString)] Handshakes completed", type: .incomingConnections)
-        return PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
+        let c = PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
+        await torrent.add(connection: c)
+        return c
     }
 
     static func outgoing(to peerID: PeerID, at address: SocketAddress, for torrent: Torrent, asPartOf client: TorrentClient) async throws -> PeerConnection {
@@ -112,7 +114,9 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             }
 
             Logger.shared.log("[\(uuid.uuidString)] Handshakes completed", type: .outgoingConnections)
-            return PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
+            let c = PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
+            await torrent.add(connection: c)
+            return c
         } catch {
             Logger.shared.warn("Connection \(uuid.uuidString) closed with error: \(error)", type: .outgoingConnections)
             throw error
@@ -331,6 +335,9 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
     }
 
     func close() throws {
+        Task {
+            await torrent.remove(connection: self)
+        }
         try socket.close()
     }
 }

@@ -132,9 +132,7 @@ public actor Torrent {
                         return
                     }
                 }
-                Task {
-                    try await self.client.makeConnection(to: peerID, at: addr, for: self)
-                }
+                self.makeConnection(to: peerID, at: addr)
             }
         }
 
@@ -150,6 +148,29 @@ public actor Torrent {
                 try await Task.sleep(for: .seconds(obj.interval))
                 try await performTrackerRequest(for: .periodic)
             }
+        }
+    }
+
+    func makeConnection(to peerID: PeerID, at address: SocketAddress) {
+        Task {
+            let conn = try await PeerConnection.outgoing(to: peerID, at: address, for: self, asPartOf: self.client)
+            defer { try? conn.close() }
+            do {
+                try await conn.runP2P()
+                Logger.shared.log("[\(conn)] closed gracefully", type: .outgoingConnections)
+            } catch {
+                Logger.shared.warn("[\(conn)] closed with error \(error)", type: .outgoingConnections)
+                throw error
+            }
+        }
+    }
+
+    func add(connection: PeerConnection) {
+        self.connections.append(connection)
+    }
+    func remove(connection: PeerConnection) {
+        self.connections.removeAll { pc in
+            pc.uuid == connection.uuid
         }
     }
 

@@ -96,18 +96,6 @@ public actor TorrentClient {
         }
     }
 
-    internal func makeConnection(to peerID: PeerID, at address: SocketAddress, for torrent: Torrent) async throws {
-        let conn = try await PeerConnection.outgoing(to: peerID, at: address, for: torrent, asPartOf: self)
-        defer { try? conn.close() }
-        do {
-            try await conn.runP2P()
-            Logger.shared.log("[\(conn)] closed gracefully", type: .outgoingConnections)
-        } catch {
-            Logger.shared.warn("[\(conn)] closed with error \(error)", type: .outgoingConnections)
-            throw error
-        }
-    }
-
     // TODO: make public
     // TODO: this should probably take a file and not a TorrentFile object
     public func addTorrent(from tf: TorrentFileV1) throws {

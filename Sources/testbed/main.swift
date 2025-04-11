@@ -41,7 +41,12 @@ let ioTask = Task {
             case "list":
                 print("client has torrents with info hashes:")
                 for (ih, t) in await client.torrents {
-                    print("- \(ih) (\(await t.isRunning ? "running" : "not running"))")
+                    if await t.isRunning {
+                        let count = await t.connections.count
+                        print("- \(ih) (running, \(count) peer(s))")
+                    } else {
+                        print("- \(ih) (not running)")
+                    }
                 }
             case "resume":
                 guard let hash = lit.next() else { continue }
@@ -76,7 +81,7 @@ let ioTask = Task {
                     }
                 }
             case "connectto":
-                try? await client.makeConnection(to: PeerID.random(), at: try! .inet(ip4: "127.0.0.1", port: 6881), for: client.torrents.first!.value)
+                await client.torrents.first!.value.makeConnection(to: .random(), at: try! .inet(ip4: "127.0.0.1", port: 6881))
             default:
                 print("unknown command")
                 continue
