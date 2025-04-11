@@ -144,7 +144,7 @@ public actor Torrent {
             self.trackerID = trackerID
         }
 
-        if event == .start || event == .periodic {
+        if event != .stop {
             self.trackerTask?.cancel()
             self.trackerTask = Task {
                 Logger.shared.log("Sleeping for \(obj.interval) seconds before next periodic request", type: .trackerRequests)
