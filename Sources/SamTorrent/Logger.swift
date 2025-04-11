@@ -10,6 +10,7 @@ public struct Logger: Sendable {
         case peerCommunication
         case trackerRequests
         case verifyingPieces
+        case resuming
 
         var logPrefix: String {
             switch self {
@@ -27,6 +28,8 @@ public struct Logger: Sendable {
                 return "TRACK"
             case .verifyingPieces:
                 return "VERFY"
+            case .resuming:
+                return "RESUM"
             }
         }
     }

@@ -55,12 +55,14 @@ actor SingleFileIO: FileIO {
     }
 
     func computeHaves(withHashes pieces: [Data]) throws -> Haves {
+        Logger.shared.log("Checking resume data", type: .resuming)
         var haves = Haves.empty(ofLength: pieces.count)
 
         try self.fileHandle.seek(toOffset: 0)
         for i in 0..<pieces.count {
             guard let data = try self.fileHandle.read(upToCount: Int(self.pieceLength)) else {
-                fatalError()
+                Logger.shared.warn("Unable to read from file; returning with \(haves.percentComplete, stringFormat: "%.2f")% recovered", type: .resuming)
+                return haves
             }
             let hash = Data(Insecure.SHA1.hash(data: data))
             if hash == pieces[i] {
@@ -68,6 +70,7 @@ actor SingleFileIO: FileIO {
             }
         }
 
+        Logger.shared.log("Recovered \(haves.percentComplete, stringFormat: "%.2f")% of the torrent", type: .resuming)
         return haves
     }
 }
@@ -177,6 +180,7 @@ actor MultiFileIO: FileIO {
     }
 
     func computeHaves(withHashes pieces: [Data]) async throws -> Haves {
+        Logger.shared.log("Checking resume data", type: .resuming)
         var haves = Haves.empty(ofLength: pieces.count)
 
         var data = Data()
@@ -186,7 +190,8 @@ actor MultiFileIO: FileIO {
             while data.count < Int(self.pieceLength) {
                 let length = Int(self.pieceLength) - data.count
                 guard let tmp = try files[fileIndex].fileHandle.read(upToCount: length) else {
-                    fatalError()
+                    Logger.shared.warn("Unable to read from file; returning with \(haves.percentComplete, stringFormat: "%.2f")% recovered", type: .resuming)
+                    return haves
                 }
                 if tmp.count < length {
                     fileIndex += 1
@@ -199,6 +204,7 @@ actor MultiFileIO: FileIO {
             data = Data()
         }
 
+        Logger.shared.log("Recovered \(haves.percentComplete, stringFormat: "%.2f")% of the torrent", type: .resuming)
         return haves
     }
 }
