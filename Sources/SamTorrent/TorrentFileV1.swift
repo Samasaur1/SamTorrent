@@ -7,6 +7,8 @@ public struct TorrentFileV1: Codable, Sendable {
         struct MultipleFileInfo: Codable {
             let length: Int
             let path: [String]
+
+            let md5sum: Data?
         }
 
         let name: String
