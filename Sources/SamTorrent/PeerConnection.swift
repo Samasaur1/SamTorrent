@@ -334,6 +334,15 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             }
             group.addTask {
                 while await torrent.isRunning {
+                    if let cpd = currentPieceData {
+                        try await socket.write(cpd.nextFiveRequests().map { $0.makeMessage() }.reduce(Data(), +))
+                        // let requests = cpd.nextFiveRequests()
+                        // for req in requests {
+                        //     try await socket.write(req.makeMessage())
+                        // }
+                    } else {
+                        // currentPieceData == nil => most recent piece was completed
+                    }
                     try await Task.sleep(for: .seconds(1))
                 }
             }
