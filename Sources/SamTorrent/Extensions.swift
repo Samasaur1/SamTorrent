@@ -70,6 +70,12 @@ extension Data {
             }
         }.joined(separator: "")
     }
+
+    func chunks(ofSize size: Int) -> [Data] {
+        return stride(from: 0, to: count, by: size).map { segmentStartIndex in
+            Data(self[segmentStartIndex..<(segmentStartIndex+size)])
+        }
+    }
 }
 
 // https://www.swiftbysundell.com/articles/async-and-concurrent-forEach-and-map/

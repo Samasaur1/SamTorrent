@@ -41,3 +41,39 @@ public struct TorrentFileV1: Codable, Sendable {
         Int( (Double(length)/Double(info.pieceLength)) .rounded(.up) )
     }
 }
+
+public struct TorrentFile: Sendable {
+    struct File: Sendable {
+        let length: Int
+        let pathFromRoot: [String]
+    }
+
+    let length: Int
+    let pieces: [Data]
+    let pieceCount: Int
+    let pieceLength: Int
+    let name: String
+
+    let files: [File]
+
+    init(from torrentFile: TorrentFileV1) {
+        self.length = torrentFile.info.length ?? torrentFile.info.files!.map { $0.length }.reduce(0, +)
+        guard torrentFile.info.pieces.count.isMultiple(of: 20) else {
+            fatalError()
+        }
+        self.pieces = torrentFile.info.pieces.chunks(ofSize: 20)
+        self.pieceCount = self.pieces.count
+        self.pieceLength = torrentFile.info.pieceLength
+        self.name = torrentFile.info.name
+
+        if let l = torrentFile.info.length {
+            self.files = [File(length: l, pathFromRoot: [])]
+        } else {
+            self.files = torrentFile.info.files!.map { File(length: $0.length, pathFromRoot: $0.path) }
+        }
+
+        guard self.pieces.count == Int( (Double(self.length)/Double(self.pieceLength)) .rounded(.up) ) else {
+            fatalError()
+        }
+    }
+}
