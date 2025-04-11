@@ -196,6 +196,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             async let x: Void = socket.write(localHavesCopy.makeMessage())
             try await x
             
+            var currentPieceData: PieceData? = nil
 
             group.addTask {
                 while await torrent.isRunning {
@@ -255,9 +256,15 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         // piece
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
-                        let piece = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
+                        let piece = Data(messageData[9...])
                         Logger.shared.log("[\(self)] Peer sent piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
-                        // TODO: handle piece
+                        currentPieceData?.receive(piece, at: begin, in: index)
+                        if currentPieceData?.isComplete ?? false {
+                            if let data = currentPieceData?.verify() {
+                                try await torrent.fileIO.write(data, inPiece: UInt64(index), beginningAt: UInt64(begin))
+                                currentPieceData = nil
+                            }
+                        }
                     case 8:
                         // cancel
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)

@@ -2,7 +2,7 @@ import Foundation
 import Crypto
 
 // From Gauck (2022). Used with permission.
-struct PieceRequest: Equatable, Hashable {
+struct PieceRequest: Equatable, Hashable, Sendable {
     let index: UInt32
     let offset: UInt32
     let length: UInt32
@@ -47,8 +47,8 @@ struct PieceData {
         self.pieceHash = infoHash
     }
 
-    mutating func receive(_ data: Data, for request: PieceRequest) {
-        var segment = WrittenSegment(data, at: request.offset, of: request.length)
+    mutating func receive(_ data: Data, at offset: UInt32, in piece: UInt32) {
+        var segment = WrittenSegment(data, at: offset, of: UInt32(data.count))
         if let idx = writtenSegments.firstIndex(where: { $0.offset + $0.length == segment.offset }) {
             let previous = writtenSegments.remove(at: idx)
             segment = segment.after(previous: previous)
