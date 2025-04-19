@@ -175,28 +175,77 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         try await socket.write(data)
     }
 
+    private actor InternalState {
+        // All connections start like this
+        var peerChoking = true
+        var peerInterested = false
+        var usChoking = true
+        var usInterested = false
+
+        var peerHaves: Haves
+
+        // This lets us detect the error where a peer sends a bitfield as not the first message
+        var hasReceivedFirstMessage = false
+
+        var localHavesCopy: Haves
+
+        var currentPieceData: PieceData? = nil
+
+        init(for torrent: Torrent) async {
+            // Assume empty; overwrite if we get a bitfield message
+            self.peerHaves = Haves.empty(ofLength: torrent.torrentFile.pieceCount)
+            self.localHavesCopy = await torrent.haves
+        }
+
+        func peerChoking(_ choking: Bool) {
+            self.peerChoking = choking
+        }
+
+        func peerInterested(_ interested: Bool) {
+            self.peerInterested = interested
+        }
+
+        func peerGotPiece(withIndex index: UInt32) {
+            self.peerHaves[index] = true
+        }
+
+        func updatePeerHaves(from bitfield: Data) {
+            self.peerHaves = Haves(fromBitfield: bitfield, length: self.peerHaves.length)
+        }
+        func peerHasAll() {
+            self.peerHaves = Haves.full(ofLength: self.peerHaves.length)
+        }
+        func peerHasNone() {
+            self.peerHaves = Haves.empty(ofLength: self.peerHaves.length)
+        }
+
+        func hasReceivedFirstMessageWhileSilentlyUpdating() -> Bool {
+            let val = hasReceivedFirstMessage
+            hasReceivedFirstMessage = true
+            return val
+        }
+
+        func receivedChunk(_ data: Data, at offset: UInt32, in index: UInt32) -> Data? {
+            self.currentPieceData?.receive(data, at: offset, in: index)
+            if self.currentPieceData?.isComplete ?? false {
+                if let data = self.currentPieceData?.verify() {
+                    self.currentPieceData = nil
+                    return data
+                }
+            }
+            return nil
+        }
+    }
+
     func runP2P() async throws {
         // TODO: implement peer wire protocol
-        let torrentFile = await torrent.torrentFile
         try await withThrowingTaskGroup { group in
-            // All connections start like this
-            var peerChoking = true
-            var peerInterested = false
-            var usChoking = true
-            var usInterested = false
 
-            // Assume empty; overwrite if we get a bitfield message
-            var peerHaves: Haves = Haves.empty(ofLength: torrentFile.pieceCount)
+            let state = await InternalState(for: torrent)
 
-            // This lets us detect the error where a peer sends a bitfield as not the first message
-            var hasReceivedFirstMessage = false
-
-            var localHavesCopy = await torrent.haves
-            Logger.shared.log("[\(self)] Writing initial bitfield (\(localHavesCopy.percentComplete, stringFormat: "%.2f")% of file) to connection", type: .peerCommunication)
-            async let x: Void = socket.write(localHavesCopy.makeMessage())
+            Logger.shared.log("[\(self)] Writing initial bitfield (\(await state.localHavesCopy.percentComplete, stringFormat: "%.2f")% of file) to connection", type: .peerCommunication)
+            async let x: Void = socket.write(state.localHavesCopy.makeMessage())
             try await x
-            
-            var currentPieceData: PieceData? = nil
 
             group.addTask {
                 while await torrent.isRunning {
@@ -207,34 +256,33 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         continue
                     }
                     let messageData = try await socket.read(bytes: Int(messageLength))
-                    defer { hasReceivedFirstMessage = true }
 
                     switch messageData[0] {
                     case 0:
                         // choke
-                        peerChoking = true
+                        await state.peerChoking(true)
                         Logger.shared.log("[\(self)] Peer is now choking us", type: .peerCommunication)
                     case 1:
                         // unchoke
-                        peerChoking = false
+                        await state.peerChoking(false)
                         Logger.shared.log("[\(self)] Peer is no longer choking us", type: .peerCommunication)
                     case 2:
                         // interested
-                        peerInterested = true
+                        await state.peerInterested(true)
                         Logger.shared.log("[\(self)] Peer is now interested in us", type: .peerCommunication)
                     case 3:
                         // not interested
-                        peerInterested = false
+                        await state.peerInterested(false)
                         Logger.shared.log("[\(self)] Peer is no longer interested in us", type: .peerCommunication)
                     case 4:
                         // have
                         let index = UInt32(bigEndian: Data(messageData[1...]).to(type: UInt32.self)!)
-                        peerHaves[index] = true
+                        await state.peerGotPiece(withIndex: index)
                         Logger.shared.log("[\(self)] Peer now has piece \(index)", type: .peerCommunication)
                         // TODO: perhaps kick off another request
                     case 5:
                         // bitfield
-                        if hasReceivedFirstMessage {
+                        if await state.hasReceivedFirstMessageWhileSilentlyUpdating() {
                             // The original BitTorrent spec (BEP0003) just says "'bitfield' is only ever sent as the first message."
                             // It doesn't clarify what clients should do if this is violated, but based on other BEPs I believe that
                             //   clients are supposed to close the connection.
@@ -242,8 +290,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             throw TorrentError.bitfieldAfterStart
                         }
                         let bitfield = Data(messageData[1...])
-                        peerHaves = Haves(fromBitfield: bitfield, length: peerHaves.length)
-                        Logger.shared.log("[\(self)] Peer sent bitfield (has \(localHavesCopy.percentComplete, stringFormat: "%.2f")% of the file)", type: .peerCommunication)
+                        await state.updatePeerHaves(from: bitfield)
+                        Logger.shared.log("[\(self)] Peer sent bitfield (has \(await state.localHavesCopy.percentComplete, stringFormat: "%.2f")% of the file)", type: .peerCommunication)
                     case 6:
                         // request
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
@@ -258,12 +306,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = Data(messageData[9...])
                         Logger.shared.log("[\(self)] Peer sent piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
-                        currentPieceData?.receive(piece, at: begin, in: index)
-                        if currentPieceData?.isComplete ?? false {
-                            if let data = currentPieceData?.verify() {
-                                try await torrent.fileIO.write(data, inPiece: UInt64(index), beginningAt: UInt64(begin))
-                                currentPieceData = nil
-                            }
+                        if let data = await state.receivedChunk(piece, at: begin, in: index) {
+                            try await torrent.fileIO.write(data, inPiece: UInt64(index), beginningAt: UInt64(begin))
                         }
                     case 8:
                         // cancel
@@ -295,11 +339,11 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
 
-                        if hasReceivedFirstMessage {
+                        if await state.hasReceivedFirstMessageWhileSilentlyUpdating() {
                             Logger.shared.warn("[\(self)] Peer sent haveAll after already sending messages", type: .peerCommunication)
                             throw TorrentError.bitfieldAfterStart
                         }
-                        peerHaves = Haves.full(ofLength: peerHaves.length)
+                        await state.peerHasAll()
                     case 0x0F:
                         // have none
                         guard ExtensionData.supportedByMe.contains(.fast) else {
@@ -307,11 +351,11 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
 
-                        if hasReceivedFirstMessage {
+                        if await state.hasReceivedFirstMessageWhileSilentlyUpdating() {
                             Logger.shared.warn("[\(self)] Peer sent haveNone after already sending messages", type: .peerCommunication)
                             throw TorrentError.bitfieldAfterStart
                         }
-                        peerHaves = Haves.empty(ofLength: peerHaves.length)
+                        await state.peerHasNone()
                     case 0x10:
                         // reject request
                         guard ExtensionData.supportedByMe.contains(.fast) else {
@@ -334,7 +378,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             }
             group.addTask {
                 while await torrent.isRunning {
-                    if let cpd = currentPieceData {
+                    if let cpd = await state.currentPieceData {
                         try await socket.write(cpd.nextFiveRequests().map { $0.makeMessage() }.reduce(Data(), +))
                         // let requests = cpd.nextFiveRequests()
                         // for req in requests {
