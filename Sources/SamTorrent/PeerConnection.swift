@@ -328,6 +328,10 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                     // BEP0005 (DHT PROTOCOL)
                     case 9:
                         // port
+                        guard supportedExtensions.contains(.dht) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
                         guard ExtensionData.supportedByMe.contains(.dht) else {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the DHT protocol (BEP 5), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 5)
@@ -336,12 +340,20 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                     // BEP0006 FAST EXTENSION
                     case 0x0D:
                         // suggest piece
+                        guard supportedExtensions.contains(.fast) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
                         guard ExtensionData.supportedByMe.contains(.fast) else {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
                     case 0x0E:
                         // have all
+                        guard supportedExtensions.contains(.fast) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
                         guard ExtensionData.supportedByMe.contains(.fast) else {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
@@ -354,6 +366,10 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         await state.peerHasAll()
                     case 0x0F:
                         // have none
+                        guard supportedExtensions.contains(.fast) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
                         guard ExtensionData.supportedByMe.contains(.fast) else {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
@@ -366,12 +382,20 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         await state.peerHasNone()
                     case 0x10:
                         // reject request
+                        guard supportedExtensions.contains(.fast) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
                         guard ExtensionData.supportedByMe.contains(.fast) else {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
                     case 0x11:
                         // allowed fast
+                        guard supportedExtensions.contains(.fast) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
                         guard ExtensionData.supportedByMe.contains(.fast) else {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
