@@ -1,5 +1,43 @@
 import Foundation
 import FlyingSocks
+import BencodeKit
+
+struct ExtensionProtocolHandshake: Codable {
+    struct SupportedExtensions: Codable {
+        var peerExchange: UInt8?
+        // other extension protocol extensions
+
+        // other things in the handshake
+
+        enum CodingKeys: String, CodingKey {
+            case peerExchange = "ut_pex"
+        }
+    }
+
+    let supportedExtensions: SupportedExtensions
+
+    // BEP0010 Extension Protocol
+    let listeningPort: UInt16?
+    let clientVersion: String?
+    let yourIP: String?
+    let ipv6: Data?
+    let ipv4: Data?
+    let outstandingRequests: Int?
+
+    // BEP0009 Extension for Peers to Send Metadata Files
+    let metadataSize: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case supportedExtensions = "m"
+        case listeningPort = "p"
+        case clientVersion = "v"
+        case yourIP = "yourip"
+        case ipv6, ipv4
+        case outstandingRequests = "reqq"
+
+        case metadataSize = "metadata_size"
+    }
+}
 
 public struct PeerConnection: Sendable, CustomStringConvertible {
     let uuid: UUID
@@ -401,6 +439,33 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
                     // END BEP0006 FAST EXTENSION
+                    // BEP0010 EXTENSION PROTOCOL
+                    case 20:
+                        // extended
+                        guard supportedExtensions.contains(.extension) else {
+                            Logger.shared.warn("[\(self)] Peer sent P2P message it claims not to support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 5)
+                        }
+                        guard ExtensionData.supportedByMe.contains(.extension) else {
+                            Logger.shared.warn("[\(self)] Got P2P message that requires the extension protocol (BEP 10), which we don't support", type: .peerCommunication)
+                            throw TorrentError.unsupportedExtension(BEP: 10)
+                        }
+
+                        switch messageData[1] {
+                        case 0:
+                            // handshake
+                            let decoder = BencodeDecoder()
+                            decoder.unknownKeyDecodingStrategy = .ignore
+                            let handshake = try decoder.decode(ExtensionProtocolHandshake.self, from: messageData[2...])
+                            Logger.shared.log("[\(self)] Got extension protocol handshake with \(handshake.supportedExtensions)", type: .peerCommunication)
+                            if let client = handshake.clientVersion {
+                                Logger.shared.log("[\(self)] Peer self-reports client as '\(client)'", type: .peerCommunication)
+                            }
+                        default:
+                            Logger.shared.error("[\(self)] Got extension protocol message that we don't support", type: .peerCommunication)
+                            throw TorrentError.unknownP2PMessage
+                        }
+                    // END BEP0010 EXTENSION PROTOCOL
                     default:
                         Logger.shared.warn("[\(self)] Unknown message type", type: .peerCommunication)
                         throw TorrentError.unknownP2PMessage
