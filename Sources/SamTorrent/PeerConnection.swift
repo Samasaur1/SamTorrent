@@ -191,6 +191,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
 
         var currentPieceData: PieceData? = nil
 
+        var peerRequests: Set<PieceRequest> = []
+
         init(for torrent: Torrent) async {
             // Assume empty; overwrite if we get a bitfield message
             self.peerHaves = Haves.empty(ofLength: torrent.torrentFile.pieceCount)
@@ -234,6 +236,13 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                 }
             }
             return nil
+        }
+
+        func got(_ request: PieceRequest) {
+            self.peerRequests.insert(request)
+        }
+        func canceled(_ request: PieceRequest) {
+            self.peerRequests.remove(request)
         }
     }
 
@@ -279,7 +288,6 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let index = UInt32(bigEndian: Data(messageData[1...]).to(type: UInt32.self)!)
                         await state.peerGotPiece(withIndex: index)
                         Logger.shared.log("[\(self)] Peer now has piece \(index)", type: .peerCommunication)
-                        // TODO: perhaps kick off another request
                     case 5:
                         // bitfield
                         if await state.hasReceivedFirstMessageWhileSilentlyUpdating() {
@@ -299,7 +307,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
                         Logger.shared.log("[\(self)] Peer requested \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         let req = PieceRequest(index: index, offset: begin, length: length)
-                        // TODO: build request and add to set
+                        await state.got(req)
                     case 7:
                         // piece
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
@@ -316,7 +324,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
                         Logger.shared.log("[\(self)] Peer canceled previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         let req = PieceRequest(index: index, offset: begin, length: length)
-                        // TODO: build request and remove from set
+                        await state.canceled(req)
                     // BEP0005 (DHT PROTOCOL)
                     case 9:
                         // port
