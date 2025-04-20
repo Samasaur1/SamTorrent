@@ -240,6 +240,11 @@ public actor Torrent {
 
     func gotPiece(at index: UInt32) {
         self.haves[index] = true
+        if self.haves.isComplete {
+            Task {
+                try await self.performTrackerRequest(for: .complete)
+            }
+        }
     }
 
     // May be temporary
