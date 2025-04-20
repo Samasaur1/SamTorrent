@@ -318,14 +318,14 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
 
             for newPiece in newPieces {
                 data.append(makeHaveMessage(for: newPiece))
-                Logger.shared.warn("[\(connection)] Informing peer that we have piece \(newPiece)", type: .peerCommunication)
+                Logger.shared.log("[\(connection)] Informing peer that we have piece \(newPiece)", type: .peerCommunication)
             }
 
             if let currentPieceData {
                 if localHavesCopy[currentPieceData.idx] {
                     // Another connection has grabbed this piece
                     self.currentPieceData = nil
-                    Logger.shared.warn("[\(connection)] Another connection has finished piece \(currentPieceData.idx), which we were working on", type: .peerCommunication)
+                    Logger.shared.log("[\(connection)] Another connection has finished piece \(currentPieceData.idx), which we were working on", type: .peerCommunication)
                 } else if currentPieceData.isComplete {
                     // We have completed this piece
                     if let data = currentPieceData.verify() {
