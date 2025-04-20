@@ -110,8 +110,27 @@ public actor Torrent {
             fatalError("Tracker request failed with error: \(obj.failureReason)")
         }
 
-        guard let obj = try? BencodeDecoder().decode(TrackerResponse.self, from: data) else {
-            Logger.shared.error("Cannot decode \(event) tracker response", type: .trackerRequests)
+        let obj: TrackerResponse
+        do {
+            obj = try BencodeDecoder().decode(TrackerResponse.self, from: data)
+        } catch let error as DecodingError {
+            let msg: String
+            switch error {
+            case .dataCorrupted(let context):
+                msg = "(data corrupted at \(context.codingPath) with message \(context.debugDescription))"
+            case let .keyNotFound(codingKey, context):
+                msg = "(missing '\(codingKey)' key at \(context.codingPath) with message \(context.debugDescription))"
+            case let .typeMismatch(type, context):
+                msg = "(value at \(context.codingPath) was of type \(type) with message \(context.debugDescription))"
+            case let .valueNotFound(type, context):
+                msg = "(missing value of type \(type) at \(context.codingPath) with message \(context.debugDescription))"
+            @unknown default:
+                msg = "(<unknown future case>)"
+            }
+            Logger.shared.error("Cannot decode \(event) tracker response \(msg)", type: .trackerRequests)
+            fatalError()
+        } catch {
+            Logger.shared.error("Unexpected error while decoding \(event) tracker response (error: \(error))", type: .trackerRequests)
             fatalError()
         }
 
