@@ -24,7 +24,7 @@ public actor Torrent {
     let port: UInt16
     let client: TorrentClient
 
-    var connections: [PeerConnection] = []
+    public private(set) var connections: [PeerConnection] = []
     var fileIO: FileIO
 
     // TODO: better way to pass the peer ID around?
@@ -154,7 +154,8 @@ public actor Torrent {
         }
     }
 
-    func makeConnection(to peerID: PeerID, at address: SocketAddress) {
+    // TODO: this should not be public. only for testing purposes.
+    public func makeConnection(to peerID: PeerID, at address: SocketAddress) {
         Task {
             let conn = try await PeerConnection.outgoing(to: peerID, at: address, for: self, asPartOf: self.client)
             defer { try? conn.close() }

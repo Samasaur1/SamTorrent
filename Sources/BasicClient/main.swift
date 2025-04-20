@@ -1,5 +1,5 @@
 import Foundation
-@testable import SamTorrent // to be able to call makeConnection on TorrentClient
+import SamTorrent
 import BencodeKit
 
 let client = TorrentClient()
