@@ -149,6 +149,11 @@ public actor Torrent {
                     peerID = nil
                 }
 
+                if self.connections.contains(where: { $0.peerID == peerID }) {
+                    // Duplicate connection
+                    break
+                }
+
                 let addr: SocketAddress
                 do {
                     addr = try .inet(ip4: peerInfo.ip, port: peerInfo.port)

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PeerID: Sendable, CustomStringConvertible {
+public struct PeerID: Equatable, Sendable, CustomStringConvertible {
     public static func random() -> PeerID {
         let versionData = "-SG0100-".data(using: .ascii)!
         let randomData = Data((0..<12).map { _ in UInt8.random(in: UInt8.min...UInt8.max) })
