@@ -373,7 +373,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         }
                         let bitfield = Data(messageData[1...])
                         await state.updatePeerHaves(from: bitfield)
-                        Logger.shared.log("[\(self)] Peer sent bitfield (has \(await state.localHavesCopy.percentString) of the file)", type: .peerCommunication)
+                        Logger.shared.log("[\(self)] Peer sent bitfield (has \(await state.peerHaves.percentString) of the file)", type: .peerCommunication)
                     case 6:
                         // request
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
