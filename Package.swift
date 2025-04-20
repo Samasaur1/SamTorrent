@@ -16,6 +16,7 @@ let package = Package(
         .package(url: "https://github.com/Samasaur1/BencodeKit", branch: "main"),
         .package(url: "https://github.com/onevcat/Rainbow", from: "4.0.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", "1.0.0" ..< "3.0.0"),
+        .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -24,6 +25,7 @@ let package = Package(
             name: "BasicClient",
             dependencies: [
                 "SamTorrent",
+                .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
             ]
         ),
         .target(

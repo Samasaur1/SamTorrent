@@ -1,6 +1,7 @@
 import Foundation
 import SamTorrent
 import BencodeKit
+import AsyncAlgorithms
 
 let client = TorrentClient()
 
@@ -80,6 +81,32 @@ let ioTask = Task {
                         }
                     }
                 }
+            case "resumeinteractive":
+                async let pausedTorrents = Array(client.torrents.async.filter { await !$0.value.isRunning }).enumerated()
+                print("Choose a torrent to resume:")
+                for (idx, (ih, t)) in await pausedTorrents {
+                    print("(\(idx)): \(ih)")
+                }
+                let choice = Int(readLine()!)
+                guard let torrent = await pausedTorrents.first(where: { $0.offset == choice }) else {
+                    print("Invalid selection")
+                    continue
+                }
+                await torrent.element.value.resume()
+                print("\(torrent.element.key) resumed")
+            case "pauseinteractive":
+                async let runningTorrents = Array(client.torrents.async.filter { await $0.value.isRunning }).enumerated()
+                print("Choose a torrent to pause:")
+                for (idx, (ih, t)) in await runningTorrents {
+                    print("(\(idx)): \(ih)")
+                }
+                let choice = Int(readLine()!)
+                guard let torrent = await runningTorrents.first(where: { $0.offset == choice }) else {
+                    print("Invalid selection")
+                    continue
+                }
+                await torrent.element.value.pause()
+                print("\(torrent.element.key) paused")
             case "connectto":
                 await client.torrents.first!.value.makeConnection(to: .random(), at: try! .inet(ip4: "127.0.0.1", port: 6881))
             default:
