@@ -91,13 +91,11 @@ struct /*The*/ Haves /*And The Have-Nots*/ : Equatable {
         arr.map { $0 ? "1" : "0"}.joined(separator: "")
     }
 
-    var percentComplete: Double {
-        var successes = 0.0
-        for val in arr {
-            if val {
-                successes += 1
-            }
-        }
-        return successes/Double(length)*100
+    var fractionComplete: Double {
+        Double(self.arr.count { $0 }) / Double(length)
+    }
+
+    var percentString: String {
+        fractionComplete.formatted(.percent.precision(.fractionLength(2)))
     }
 }

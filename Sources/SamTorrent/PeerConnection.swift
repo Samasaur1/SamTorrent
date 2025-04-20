@@ -327,7 +327,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                 Logger.shared.log("[\(self)] Writing extension protocol handshake \(handshake)", type: .peerCommunication)
                 try await socket.write(data)
             }
-            Logger.shared.log("[\(self)] Writing initial bitfield (\(await state.localHavesCopy.percentComplete, stringFormat: "%.2f")% of file) to connection", type: .peerCommunication)
+            Logger.shared.log("[\(self)] Writing initial bitfield (\(await state.localHavesCopy.percentString) of file) to connection", type: .peerCommunication)
             try await socket.write(state.localHavesCopy.makeMessage())
 
             group.addTask {
@@ -373,7 +373,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         }
                         let bitfield = Data(messageData[1...])
                         await state.updatePeerHaves(from: bitfield)
-                        Logger.shared.log("[\(self)] Peer sent bitfield (has \(await state.localHavesCopy.percentComplete, stringFormat: "%.2f")% of the file)", type: .peerCommunication)
+                        Logger.shared.log("[\(self)] Peer sent bitfield (has \(await state.localHavesCopy.percentString) of the file)", type: .peerCommunication)
                     case 6:
                         // request
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
