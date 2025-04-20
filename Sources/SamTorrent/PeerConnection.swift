@@ -474,6 +474,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                 }
             }
             group.addTask {
+                // TODO: serve peer requests
                 while await torrent.isRunning {
                     if let cpd = await state.currentPieceData {
                         try await socket.write(cpd.nextFiveRequests().map { $0.makeMessage() }.reduce(Data(), +))
@@ -486,6 +487,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                     }
                     try await Task.sleep(for: .seconds(1))
                 }
+                // TODO: this would be so that the other task in the task group cancels when `torrent.isRunning` becomes false
+                // group.cancelAll()
             }
             try await group.next()
         }
