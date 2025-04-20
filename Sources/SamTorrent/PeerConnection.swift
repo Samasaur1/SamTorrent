@@ -12,6 +12,12 @@ struct ExtensionProtocolHandshake: Codable {
         enum CodingKeys: String, CodingKey {
             case peerExchange = "ut_pex"
         }
+
+        static func makeForMe() -> Self {
+            return Self(
+                peerExchange: 0
+            )
+        }
     }
 
     let supportedExtensions: SupportedExtensions
@@ -36,6 +42,19 @@ struct ExtensionProtocolHandshake: Codable {
         case outstandingRequests = "reqq"
 
         case metadataSize = "metadata_size"
+    }
+
+    static func makeForMe() -> Self {
+        return Self(
+            supportedExtensions: .makeForMe(),
+            listeningPort: nil,
+            clientVersion: "SamTorrent 0.1.0",
+            yourIP: nil,
+            ipv6: nil,
+            ipv4: nil,
+            outstandingRequests: nil,
+            metadataSize: nil,
+        )
     }
 }
 
@@ -296,9 +315,20 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
 
             let state = await InternalState(for: torrent)
 
+
+            if self.supportedExtensions.contains(.extension) && ExtensionData.supportedByMe.contains(.extension) {
+                // The extension protocol (BEP0010) says this message
+                // "should be sent immediately after the standard bittorrent handshake to any peer that supports this extension protocol."
+                // It doesn't clarify how this interacts with the original spec (BEP0003) saying that bitfield messages must be first
+                // or with the fast extension (BEP0006) and its have all/have none messages.
+                // Anecdotal evidence from running my client seems to imply that the convention is to do the extension protocol handshake first.
+                let handshake = ExtensionProtocolHandshake.makeForMe()
+                let data = try BencodeEncoder().encode(handshake)
+                Logger.shared.log("[\(self)] Writing extension protocol handshake \(handshake)", type: .peerCommunication)
+                try await socket.write(data)
+            }
             Logger.shared.log("[\(self)] Writing initial bitfield (\(await state.localHavesCopy.percentComplete, stringFormat: "%.2f")% of file) to connection", type: .peerCommunication)
-            async let x: Void = socket.write(state.localHavesCopy.makeMessage())
-            try await x
+            try await socket.write(state.localHavesCopy.makeMessage())
 
             group.addTask {
                 while await torrent.isRunning {
