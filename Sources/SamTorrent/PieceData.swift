@@ -2,13 +2,18 @@ import Foundation
 import Crypto
 
 // From Gauck (2022). Used with permission.
-struct PieceRequest: Equatable, Hashable, Sendable {
+struct PieceRequest: Equatable, Hashable, Sendable, CustomStringConvertible {
     let index: UInt32
     let offset: UInt32
     let length: UInt32
 
     func makeMessage() -> Data {
         return Data(from: UInt32(13).bigEndian) + [6] + Data(from: index.bigEndian) + Data(from: offset.bigEndian) + Data(from: length.bigEndian)
+    }
+
+    var description: String {
+        let count = Measurement(value: Double(length), unit: UnitInformationStorage.bytes)
+        return "\(count.formatted(.byteCount(style: .file))) at offset \(offset) of piece \(index)"
     }
 }
 

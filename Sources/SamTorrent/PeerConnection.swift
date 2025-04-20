@@ -347,7 +347,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             if ourRequests.count >= 5 { break }
                             ourRequests.insert(r)
                             data.append(r.makeMessage())
-                            Logger.shared.log("[\(connection)] Requesting \(r.length) bytes at offset \(r.offset) of piece \(r.index)", type: .peerCommunication)
+                            Logger.shared.log("[\(connection)] Requesting \(r)", type: .peerCommunication)
                         }
                     }
                 }
@@ -489,23 +489,24 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
-                        Logger.shared.log("[\(self)] Peer requested \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         let req = PieceRequest(index: index, offset: begin, length: length)
+                        Logger.shared.log("[\(self)] Peer requested \(req)", type: .peerCommunication)
                         await state.got(req)
                     case 7:
                         // piece
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = Data(messageData[9...])
-                        Logger.shared.log("[\(self)] Peer sent piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        let _count = Measurement(value: Double(piece.count), unit: UnitInformationStorage.bytes)
+                        Logger.shared.log("[\(self)] Peer sent \(_count.formatted(.byteCount(style: .file))) chunk at offset \(begin) of piece \(index)", type: .peerCommunication)
                         await state.receivedChunk(piece, at: begin, in: index)
                     case 8:
                         // cancel
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let length = UInt32(bigEndian: Data(messageData[9...]).to(type: UInt32.self)!)
-                        Logger.shared.log("[\(self)] Peer canceled previous request for \(length) bytes at offset \(begin) of piece \(index)", type: .peerCommunication)
                         let req = PieceRequest(index: index, offset: begin, length: length)
+                        Logger.shared.log("[\(self)] Peer canceled previous request for \(req)", type: .peerCommunication)
                         await state.canceled(req)
                     // BEP0005 (DHT PROTOCOL)
                     case 9:
