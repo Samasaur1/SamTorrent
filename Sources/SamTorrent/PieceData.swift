@@ -41,10 +41,10 @@ struct PieceData {
         writtenSegments.map(\.length).reduce(0, +)
     }
 
-    init(idx: UInt32, size: UInt32, infoHash: Data) {
+    init(idx: UInt32, size: UInt32, pieceHash: Data) {
         self.idx = idx
         self.size = size
-        self.pieceHash = infoHash
+        self.pieceHash = pieceHash
     }
 
     mutating func receive(_ data: Data, at offset: UInt32, in piece: UInt32) {
