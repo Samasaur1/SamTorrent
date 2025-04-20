@@ -119,6 +119,9 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             do {
                 socket = try await AsyncSocketWrapper.connected(to: address, pool: client.pool)
                 Logger.shared.log("[\(uuid.uuidString)] Connected to \(addrString)", type: .outgoingConnections)
+            } catch let error as TimeoutError {
+                Logger.shared.warn("[\(uuid.uuidString)] Timed out while attempting to connect to \(addrString)", type: .outgoingConnections)
+                throw error
             } catch {
                 Logger.shared.warn("[\(uuid.uuidString)] Unable to connect to \(addrString) (error: \(error))", type: .outgoingConnections)
                 throw error
@@ -155,8 +158,11 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             let c = PeerConnection(uuid: uuid, peerID: theirPeerID, infoHash: infoHash, supportedExtensions: theirSupportedExtensions, socket: socket, client: client, torrent: torrent)
             await torrent.add(connection: c)
             return c
+        } catch let error as TimeoutError {
+            Logger.shared.warn("[\(uuid.uuidString)] Connection timed out", type: .outgoingConnections)
+            throw error
         } catch {
-            Logger.shared.warn("Connection \(uuid.uuidString) closed with error: \(error)", type: .outgoingConnections)
+            Logger.shared.warn("[\(uuid.uuidString)] Connection closed with error: \(error)", type: .outgoingConnections)
             throw error
         }
     }
