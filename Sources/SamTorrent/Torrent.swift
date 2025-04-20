@@ -134,7 +134,9 @@ public actor Torrent {
 
         // This should maybe be made a little nicer
         if event != .stop {
-            obj.peers.shuffled().prefix(upTo: 5).map { peerInfo in
+            var it = obj.peers.shuffled().makeIterator()
+            while self.connections.count < 10 {
+                guard let peerInfo = it.next() else { break }
                 let peerID: PeerID?
                 if let bytes = peerInfo.peerID {
                     peerID = PeerID(bytes: bytes)
