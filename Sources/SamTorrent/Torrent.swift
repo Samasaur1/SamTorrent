@@ -193,10 +193,30 @@ public actor Torrent {
         }
     }
 
+    func reportDownloaded(_ bytes: Int) {
+        self.downloaded += bytes
+    }
+    func reportUploaded(_ bytes: Int) {
+        self.uploaded += bytes
+    }
+
     var uploaded: Int = 0
     var downloaded: Int = 0
     var left: Int {
-        0
+        let hasLast = haves[haves.length - 1]
+        let missing = haves.arr.count { !$0 }
+
+        let outstanding = missing * self.torrentFile.pieceLength
+
+        if hasLast {
+            // All missing pieces are of size pieceLength
+            return outstanding
+        } else {
+            // One missing piece may be smaller
+            let lastPieceSize = self.torrentFile.length - ((self.torrentFile.pieceCount - 1) * self.torrentFile.pieceLength)
+            let diff = self.torrentFile.pieceLength - lastPieceSize
+            return outstanding - diff
+        }
     }
 
     var haves: Haves
