@@ -48,4 +48,50 @@ struct HavesTests {
 
         #expect(full == manual)
     }
+
+    @Test func emptyFractionCompleteCorrect() {
+        let haves = Haves.empty(ofLength: 100)
+        let real = haves.fractionComplete
+        let expected = 0.0
+        #expect(real == expected)
+    }
+
+    @Test func fullFractionCompleteCorrect() {
+        let haves = Haves.full(ofLength: 100)
+        let real = haves.fractionComplete
+        let expected = 1.0
+        #expect(real == expected)
+    }
+
+    @Test func partialFractionCompleteCorrect() {
+        var haves = Haves.full(ofLength: 100)
+        for i in 57..<100 {
+            haves[i] = false
+        }
+        let real = haves.fractionComplete
+        let expected = 0.57
+        #expect(real == expected)
+    }
+
+    @Test func emptyPercentStringCorrect() {
+        let haves = Haves.empty(ofLength: 100)
+        let real = haves.percentString
+        let expected = "0.00%"
+    }
+
+    @Test func fullPercentStringCorrect() {
+        let haves = Haves.full(ofLength: 100)
+        let real = haves.percentString
+        let expected = "0.00%"
+    }
+
+    @Test func partialPercentStringCorrect() {
+        var haves = Haves.full(ofLength: 100000)
+        for i in 56789..<100000 {
+            haves[i] = false
+        }
+        let real = haves.percentString
+        let expected = "56.79%"
+        #expect(real == expected)
+    }
 }
