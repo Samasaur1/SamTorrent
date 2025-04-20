@@ -63,10 +63,6 @@ public actor Torrent {
         if event != .periodic {
             components.queryItems?.append(URLQueryItem(name: "event", value: event.rawValue))
         }
-        if let trackerID = self.trackerID {
-            // TODO: more logging?
-            components.queryItems?.append(URLQueryItem(name: "trackerid", value: trackerID))
-        }
         components.percentEncodedQueryItems?.append(contentsOf: [
             URLQueryItem(name: "info_hash", value: self.infoHash.percentEncoded()),
             URLQueryItem(name: "peer_id", value: self.peerID.percentEncoded()),
@@ -139,7 +135,12 @@ public actor Torrent {
         // This should maybe be made a little nicer
         if event != .stop {
             obj.peers.shuffled().prefix(upTo: 5).map { peerInfo in
-                let peerID = PeerID(bytes: peerInfo.peerID)
+                let peerID: PeerID?
+                if let bytes = peerInfo.peerID {
+                    peerID = PeerID(bytes: bytes)
+                } else {
+                    peerID = nil
+                }
 
                 let addr: SocketAddress
                 do {
@@ -158,11 +159,6 @@ public actor Torrent {
             }
         }
 
-        if let trackerID = obj.trackerID {
-            Logger.shared.log("Tracker ID now set to \(trackerID)", type: .trackerRequests)
-            self.trackerID = trackerID
-        }
-
         if event != .stop {
             self.trackerTask?.cancel()
             self.trackerTask = Task {
@@ -174,7 +170,7 @@ public actor Torrent {
     }
 
     // TODO: this should not be public. only for testing purposes.
-    public func makeConnection(to peerID: PeerID, at address: SocketAddress) {
+    public func makeConnection(to peerID: PeerID?, at address: SocketAddress) {
         Task {
             let conn = try await PeerConnection.outgoing(to: peerID, at: address, for: self, asPartOf: self.client)
             defer { try? conn.close() }
@@ -202,8 +198,6 @@ public actor Torrent {
     var left: Int {
         0
     }
-
-    private var trackerID: String?
 
     var haves: Haves
 

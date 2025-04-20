@@ -123,7 +123,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         return c
     }
 
-    static func outgoing(to peerID: PeerID, at address: SocketAddress, for torrent: Torrent, asPartOf client: TorrentClient) async throws -> PeerConnection {
+    static func outgoing(to peerID: PeerID?, at address: SocketAddress, for torrent: Torrent, asPartOf client: TorrentClient) async throws -> PeerConnection {
         let uuid = UUID()
         let addrString: String
         do {
