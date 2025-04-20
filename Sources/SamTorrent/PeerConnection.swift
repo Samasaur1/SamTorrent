@@ -329,7 +329,9 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                 } else if currentPieceData.isComplete {
                     // We have completed this piece
                     if let data = currentPieceData.verify() {
+                        Logger.shared.log("[\(connection)] Finished piece \(currentPieceData.idx)", type: .peerCommunication)
                         try await connection.torrent.fileIO.write(data, inPiece: UInt64(currentPieceData.idx), beginningAt: 0)
+                        await self.connection.torrent.gotPiece(at: currentPieceData.idx)
                         self.currentPieceData = nil
                     } else {
                         Logger.shared.warn("[\(connection)] Peer gave us a piece that didn't match the expected hash", type: .peerCommunication)

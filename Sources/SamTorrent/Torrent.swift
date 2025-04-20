@@ -221,6 +221,10 @@ public actor Torrent {
 
     var haves: Haves
 
+    func gotPiece(at index: UInt32) {
+        self.haves[index] = true
+    }
+
     private var trackerTask: Task<Void, Error>? = nil
 
     public func pause() {
