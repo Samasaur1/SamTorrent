@@ -380,18 +380,16 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             // Update choking and interest
             if newInterest != usInterested {
                 usInterested = newInterest
-                var d = Data(capacity: 5)
-                d[0..<4] = Data(from: UInt32(1).bigEndian)
-                d[4] = usInterested ? 2 : 3
+                var d = Data(from: UInt32(1).bigEndian)
+                d.append(usInterested ? 2 : 3)
                 data.append(d)
             }
 
             // For now we never choke
             if usChoking {
                 usChoking = true
-                var d = Data(capacity: 5)
-                d[0..<4] = Data(from: UInt32(1).bigEndian)
-                d[4] = 1
+                var d = Data(from: UInt32(1).bigEndian)
+                d.append(1)
                 data.append(d)
             }
 
@@ -405,18 +403,16 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         }
 
         private func makeHaveMessage(for index: UInt32) -> Data {
-            var d = Data(capacity: 9)
-            d[0..<4] = Data(from: UInt32(5).bigEndian)
-            d[4] = 4
-            d[5..<9] = Data(from: index.bigEndian)
+            var d = Data(from: UInt32(5).bigEndian)
+            d.append(4)
+            d.append(Data(from: index.bigEndian))
             return d
         }
         private func makeChunkMessage(for request: PieceRequest, with data: Data) -> Data {
-            var d = Data(capacity: 13)
-            d[0..<4] = Data(from: UInt32(9 + data.count).bigEndian)
-            d[4] = 7
-            d[5..<9] = Data(from: request.index.bigEndian)
-            d[9..<13] = Data(from: request.offset.bigEndian)
+            var d = Data(from: UInt32(9 + data.count).bigEndian)
+            d.append(7)
+            d.append(Data(from: request.index.bigEndian))
+            d.append(Data(from: request.offset.bigEndian))
 
             return d + data
         }
