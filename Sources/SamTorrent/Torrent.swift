@@ -225,6 +225,11 @@ public actor Torrent {
         self.haves[index] = true
     }
 
+    // May be temporary
+    public var percentComplete: String {
+        self.haves.percentString
+    }
+
     private var trackerTask: Task<Void, Error>? = nil
 
     public func pause() {

@@ -42,11 +42,12 @@ let ioTask = Task {
             case "list":
                 print("client has torrents with info hashes:")
                 for (ih, t) in await client.torrents {
+                    let percentComplete = await t.percentComplete
                     if await t.isRunning {
                         let count = await t.connections.count
-                        print("- \(ih) (running, \(count) peer(s))")
+                        print("- \(ih) (\(percentComplete), running, \(count) peer(s))")
                     } else {
-                        print("- \(ih) (not running)")
+                        print("- \(ih) (\(percentComplete), not running)")
                     }
                 }
             case "resume":
