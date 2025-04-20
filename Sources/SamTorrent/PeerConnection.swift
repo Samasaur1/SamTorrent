@@ -246,20 +246,23 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         var usInterested = false
 
         var peerHaves: Haves
+        var localHavesCopy: Haves
 
         // This lets us detect the error where a peer sends a bitfield as not the first message
         var hasReceivedFirstMessage = false
 
-        var localHavesCopy: Haves
-
         var currentPieceData: PieceData? = nil
 
         var peerRequests: Set<PieceRequest> = []
+        var ourRequests: Set<PieceRequest> = []
 
-        init(for torrent: Torrent) async {
+        private var connection: PeerConnection
+
+        init(for connection: PeerConnection) async {
             // Assume empty; overwrite if we get a bitfield message
-            self.peerHaves = Haves.empty(ofLength: torrent.torrentFile.pieceCount)
-            self.localHavesCopy = await torrent.haves
+            self.peerHaves = Haves.empty(ofLength: connection.torrent.torrentFile.pieceCount)
+            self.localHavesCopy = await connection.torrent.haves
+            self.connection = connection
         }
 
         func peerChoking(_ choking: Bool) {
@@ -290,15 +293,10 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             return val
         }
 
-        func receivedChunk(_ data: Data, at offset: UInt32, in index: UInt32) -> Data? {
+        func receivedChunk(_ data: Data, at offset: UInt32, in index: UInt32) async {
             self.currentPieceData?.receive(data, at: offset, in: index)
-            if self.currentPieceData?.isComplete ?? false {
-                if let data = self.currentPieceData?.verify() {
-                    self.currentPieceData = nil
-                    return data
-                }
-            }
-            return nil
+            self.ourRequests.remove(PieceRequest(index: index, offset: offset, length: UInt32(data.count)))
+            await self.connection.torrent.reportDownloaded(data.count)
         }
 
         func got(_ request: PieceRequest) {
@@ -307,14 +305,127 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
         func canceled(_ request: PieceRequest) {
             self.peerRequests.remove(request)
         }
+
+        func update() async throws -> Data {
+            var data = Data()
+            var newInterest = self.usInterested
+            let pieceDataWasAlreadyNil = self.currentPieceData == nil
+
+            let upToDate = await connection.torrent.haves
+            // We calculate this so that we can announce to the peer that we have these pieces
+            let newPieces = upToDate.newPieces(fromOld: self.localHavesCopy)
+            self.localHavesCopy = upToDate
+
+            for newPiece in newPieces {
+                data.append(makeHaveMessage(for: newPiece))
+                Logger.shared.warn("[\(connection)] Informing peer that we have piece \(newPiece)", type: .peerCommunication)
+            }
+
+            if let currentPieceData {
+                if localHavesCopy[currentPieceData.idx] {
+                    // Another connection has grabbed this piece
+                    self.currentPieceData = nil
+                    Logger.shared.warn("[\(connection)] Another connection has finished piece \(currentPieceData.idx), which we were working on", type: .peerCommunication)
+                } else if currentPieceData.isComplete {
+                    // We have completed this piece
+                    if let data = currentPieceData.verify() {
+                        try await connection.torrent.fileIO.write(data, inPiece: UInt64(currentPieceData.idx), beginningAt: 0)
+                        self.currentPieceData = nil
+                    } else {
+                        Logger.shared.warn("[\(connection)] Peer gave us a piece that didn't match the expected hash", type: .peerCommunication)
+                    }
+                } else {
+                    // Neither we nor another connection have completed this piece
+                    // I think this way of queuing requests is not optimal but should work
+                    if !peerChoking {
+                        // Queue up some requests
+                        let requests = currentPieceData.nextFiveRequests()
+                        for r in requests {
+                            guard !ourRequests.contains(r) else { continue }
+                            if ourRequests.count >= 5 { break }
+                            ourRequests.insert(r)
+                            data.append(r.makeMessage())
+                            Logger.shared.log("[\(connection)] Requesting \(r.length) bytes at offset \(r.offset) of piece \(r.index)", type: .peerCommunication)
+                        }
+                    }
+                }
+            }
+
+            if currentPieceData == nil {
+                // We need to pick a new piece
+                let potentialPieces = self.peerHaves.newPieces(fromOld: self.localHavesCopy)
+                if potentialPieces.isEmpty {
+                    newInterest = false
+                    if !pieceDataWasAlreadyNil {
+                        Logger.shared.log("[\(connection)] Can't steal from peer because we've completely eclipsed them in research", type: .peerCommunication)
+                    }
+                } else {
+                    newInterest = true
+                    let index = potentialPieces.randomElement()!
+                    Logger.shared.log("[\(connection)] Now working on piece \(index)", type: .peerCommunication)
+                    let size: Int
+                    if index == self.connection.torrent.torrentFile.pieceCount - 1 {
+                        size = self.connection.torrent.torrentFile.length - (Int(index) * self.connection.torrent.torrentFile.pieceLength)
+                    } else {
+                        size = self.connection.torrent.torrentFile.pieceLength
+                    }
+                    self.currentPieceData = PieceData(idx: index, size: UInt32(size), pieceHash: self.connection.torrent.torrentFile.pieces[Int(index)])
+                }
+            }
+
+            if peerChoking {
+                self.ourRequests = []
+            }
+
+            // Update choking and interest
+            if newInterest != usInterested {
+                usInterested = newInterest
+                var d = Data(capacity: 5)
+                d[0..<4] = Data(from: UInt32(1).bigEndian)
+                d[4] = usInterested ? 2 : 3
+                data.append(d)
+            }
+
+            // For now we never choke
+            if usChoking {
+                usChoking = true
+                var d = Data(capacity: 5)
+                d[0..<4] = Data(from: UInt32(1).bigEndian)
+                d[4] = 1
+                data.append(d)
+            }
+
+            // Share pieces
+            for r in peerRequests {
+                let chunk = try await connection.torrent.fileIO.read(ofLength: Int(r.length), fromPiece: UInt64(r.index), beginningAt: UInt64(r.offset))
+                data.append(makeChunkMessage(for: r, with: chunk))
+            }
+
+            return data
+        }
+
+        private func makeHaveMessage(for index: UInt32) -> Data {
+            var d = Data(capacity: 9)
+            d[0..<4] = Data(from: UInt32(5).bigEndian)
+            d[4] = 4
+            d[5..<9] = Data(from: index.bigEndian)
+            return d
+        }
+        private func makeChunkMessage(for request: PieceRequest, with data: Data) -> Data {
+            var d = Data(capacity: 13)
+            d[0..<4] = Data(from: UInt32(9 + data.count).bigEndian)
+            d[4] = 7
+            d[5..<9] = Data(from: request.index.bigEndian)
+            d[9..<13] = Data(from: request.offset.bigEndian)
+
+            return d + data
+        }
     }
 
     func runP2P() async throws {
         // TODO: implement peer wire protocol
         try await withThrowingTaskGroup { group in
-
-            let state = await InternalState(for: torrent)
-
+            let state = await InternalState(for: self)
 
             if self.supportedExtensions.contains(.extension) && ExtensionData.supportedByMe.contains(.extension) {
                 // The extension protocol (BEP0010) says this message
@@ -327,6 +438,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                 Logger.shared.log("[\(self)] Writing extension protocol handshake \(handshake)", type: .peerCommunication)
                 try await socket.write(data)
             }
+
             Logger.shared.log("[\(self)] Writing initial bitfield (\(await state.localHavesCopy.percentString) of file) to connection", type: .peerCommunication)
             try await socket.write(state.localHavesCopy.makeMessage())
 
@@ -388,9 +500,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = Data(messageData[9...])
                         Logger.shared.log("[\(self)] Peer sent piece (chunk?) at offset \(begin) of piece \(index)", type: .peerCommunication)
-                        if let data = await state.receivedChunk(piece, at: begin, in: index) {
-                            try await torrent.fileIO.write(data, inPiece: UInt64(index), beginningAt: UInt64(begin))
-                        }
+                        await state.receivedChunk(piece, at: begin, in: index)
                     case 8:
                         // cancel
                         let index = UInt32(bigEndian: Data(messageData[1..<5]).to(type: UInt32.self)!)
@@ -410,6 +520,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the DHT protocol (BEP 5), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 5)
                         }
+
+                        // TODO: implement
                     // END BEP0005 (DHT PROTOCOL)
                     // BEP0006 FAST EXTENSION
                     case 0x0D:
@@ -422,6 +534,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
+
+                        // TODO: implement
                     case 0x0E:
                         // have all
                         guard supportedExtensions.contains(.fast) else {
@@ -464,6 +578,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
+
+                        // TODO: implement
                     case 0x11:
                         // allowed fast
                         guard supportedExtensions.contains(.fast) else {
@@ -474,6 +590,8 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                             Logger.shared.warn("[\(self)] Got P2P message that requires the fast extension (BEP 6), which we don't support", type: .peerCommunication)
                             throw TorrentError.unsupportedExtension(BEP: 6)
                         }
+
+                        // TODO: implement
                     // END BEP0006 FAST EXTENSION
                     // BEP0010 EXTENSION PROTOCOL
                     case 20:
@@ -512,16 +630,11 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
             group.addTask {
                 // TODO: serve peer requests
                 while await torrent.isRunning {
-                    if let cpd = await state.currentPieceData {
-                        try await socket.write(cpd.nextFiveRequests().map { $0.makeMessage() }.reduce(Data(), +))
-                        // let requests = cpd.nextFiveRequests()
-                        // for req in requests {
-                        //     try await socket.write(req.makeMessage())
-                        // }
-                    } else {
-                        // currentPieceData == nil => most recent piece was completed
-                    }
+                    let dataToSend = try await state.update()
+                    // This allows the sending to happen during the 1-second sleep
+                    async let finishSending: () = socket.write(dataToSend)
                     try await Task.sleep(for: .seconds(1))
+                    try await finishSending
                 }
                 // TODO: this would be so that the other task in the task group cancels when `torrent.isRunning` becomes false
                 // group.cancelAll()
