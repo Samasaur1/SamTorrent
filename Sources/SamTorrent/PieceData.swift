@@ -13,7 +13,7 @@ struct PieceRequest: Equatable, Hashable, Sendable, CustomStringConvertible {
 
     var description: String {
         let count = Measurement(value: Double(length), unit: UnitInformationStorage.bytes)
-        return "\(count.formatted(.byteCount(style: .file))) at offset \(offset) of piece \(index)"
+        return "\(count.desc()) at offset \(offset) of piece \(index)"
     }
 }
 
