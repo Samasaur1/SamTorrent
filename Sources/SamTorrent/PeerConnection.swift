@@ -498,7 +498,7 @@ public struct PeerConnection: Sendable, CustomStringConvertible {
                         let begin = UInt32(bigEndian: Data(messageData[5..<9]).to(type: UInt32.self)!)
                         let piece = Data(messageData[9...])
                         let _count = Measurement(value: Double(piece.count), unit: UnitInformationStorage.bytes)
-                        Logger.shared.log("[\(self)] Peer sent \(_count.formatted(.byteCount(style: .file))) chunk at offset \(begin) of piece \(index)", type: .peerCommunication)
+                        Logger.shared.log("[\(self)] Peer sent \(_count.desc()) chunk at offset \(begin) of piece \(index)", type: .peerCommunication)
                         await state.receivedChunk(piece, at: begin, in: index)
                     case 8:
                         // cancel

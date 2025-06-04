@@ -23,8 +23,10 @@ public actor TorrentClient {
         try await pool.prepare()
         Logger.shared.log("creating socket", type: .setup)
         let _socket = try Socket(domain: AF_INET, type: .stream)
+        #if canImport(Darwin)
         Logger.shared.log("disabling SIGPIPE", type: .setup)
         try _socket.setValue(true, for: .noSIGPIPE)
+        #endif
         Logger.shared.log("binding to address", type: .setup)
         var bound = false
         for potentialPort in UInt16(54321)...54329 {

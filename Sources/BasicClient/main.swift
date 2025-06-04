@@ -5,9 +5,23 @@ import AsyncAlgorithms
 
 let client = TorrentClient()
 
+#if !canImport(Darwin)
+struct StandardInputLineIterator: AsyncIteratorProtocol {
+    typealias Element = String
+
+    mutating func next(isolation actor: isolated (any Actor)?) async -> String? {
+        return readLine()
+    }
+}
+#endif
+
 let ioTask = Task {
     if #available(macOS 12.0, *) {
+        #if canImport(Darwin)
         var it = FileHandle.standardInput.bytes.lines.makeAsyncIterator()
+        #else
+        var it = StandardInputLineIterator()
+        #endif
         print("made asynciterator")
         while true {
             guard let line = try? await it.next() else { break }
